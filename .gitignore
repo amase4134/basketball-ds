@@ -1,0 +1,26 @@
+.DS_Store
+**/.DS_Store
+
+# Local environments and caches
+**/.venv/
+**/__pycache__/
+**/*.py[cod]
+**/*.egg-info/
+**/.pytest_cache/
+**/.ipynb_checkpoints/
+
+# Secrets and local configuration
+**/.env
+**/.env.*
+!**/.env.example
+
+# Generated data and logs
+nba_pipeline/data/raw/
+nba_pipeline/data/curated/**/*.parquet
+nba_pipeline/data/meta/*.parquet
+nba_pipeline/data/meta/*.log
+
+# Local Obsidian state
+**/.obsidian/workspace.json
+**/.obsidian/workspace-mobile.json
+**/.trash/

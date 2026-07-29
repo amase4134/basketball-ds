@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nba-pipeline"
+version = "0.1.0"
+description = "Local refreshable NBA data pipeline (nba_api → Parquet → DuckDB)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "nba_api>=1.4.1",
+    "pandas>=2.0",
+    "pyarrow>=14.0",
+    "duckdb>=1.0",
+    "typer>=0.12",
+]
+
+[project.scripts]
+nba-pipeline = "nba_pipeline.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
