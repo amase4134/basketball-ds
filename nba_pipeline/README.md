@@ -13,6 +13,33 @@ source .venv/bin/activate
 pip install -e .
 ```
 
+## Local Explorer
+
+The read-only Explorer runs only on `127.0.0.1`; the browser accesses curated
+data exclusively through the FastAPI API.
+
+```bash
+# Terminal 1, from nba_pipeline/
+source .venv/bin/activate
+uvicorn nba_pipeline.web_api.app:app --host 127.0.0.1 --port 8000 --reload
+
+# Terminal 2, from nba_pipeline/web/
+npm install
+npm run dev
+```
+
+Open http://127.0.0.1:5173. For one-process local production mode, build the
+frontend and start FastAPI:
+
+```bash
+cd web && npm run build && cd ..
+uvicorn nba_pipeline.web_api.app:app --host 127.0.0.1 --port 8000
+```
+
+Open http://127.0.0.1:8000. The API documents fixed shot-map bins (x −250…250,
+y −50…420, 25-coordinate-unit cells) and limits raw player point maps to 5,000
+shots; broader results are aggregated server-side.
+
 Or with requirements only:
 
 ```bash

@@ -25,6 +25,7 @@ def register_views(con: duckdb.DuckDBPyConnection, cfg: Settings | None = None) 
     teams = curated / "teams" / "teams.parquet"
     stats_glob = str(curated / "player_season_stats" / "**" / "*.parquet")
     shots_glob = str(curated / "shot_charts" / "**" / "*.parquet")
+    refresh_log = cfg.meta_dir / "refresh_log.parquet"
 
     if players.exists():
         con.execute(
@@ -45,6 +46,10 @@ def register_views(con: duckdb.DuckDBPyConnection, cfg: Settings | None = None) 
         con.execute(
             "CREATE OR REPLACE VIEW shot_charts AS "
             f"SELECT * FROM read_parquet('{_escape(shots_glob)}', hive_partitioning = true)"
+        )
+    if refresh_log.exists():
+        con.execute(
+            f"CREATE OR REPLACE VIEW refresh_log AS SELECT * FROM read_parquet('{_escape(refresh_log)}')"
         )
 
 
