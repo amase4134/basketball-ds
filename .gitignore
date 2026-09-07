@@ -9,6 +9,13 @@
 **/.pytest_cache/
 **/.ipynb_checkpoints/
 
+# Web app dependencies and build output
+nba_pipeline/web/node_modules/
+nba_pipeline/web/dist/
+**/*.tsbuildinfo
+nba_pipeline/web/vite.config.js
+nba_pipeline/web/vite.config.d.ts
+
 # Secrets and local configuration
 **/.env
 **/.env.*

@@ -1,0 +1,150 @@
+/*
+ * Theme tokens. Every surface colour is read from a custom property so switching
+ * `data-theme` on the document element re-skins the whole application.
+ *
+ * `tipoff` is the default: cyan-to-royal gradient, navy type, and basketball orange
+ * sampled from the Basketball Data Science mark. `calm` keeps the warm paper tones.
+ */
+
+:root,
+:root[data-theme='tipoff'] {
+  --bg: #e7f4f8;
+  --surface: #ffffff;
+  --surface-alt: #d8eef4;
+  --surface-hover: #c6e5ee;
+  --text: #05294b;
+  --text-muted: #3d5f7a;
+  --border: #b5d3e0;
+  --border-strong: #6fa4bb;
+  --accent: #c4470a;
+  --accent-hover: #a33b08;
+  --accent-text: #ffffff;
+  --accent-alt: #1a3ca5;
+  --accent-soft: #d3eef4;
+  --positive: #1b7a4a;
+  --negative: #b33328;
+  --focus: #2f94ca;
+  --shadow: 0 1px 2px rgb(5 41 75 / 12%);
+  --shadow-pop: 0 8px 24px rgb(5 41 75 / 16%);
+  --court-floor: #f3d7a4;
+  --court-line: #1a3ca5;
+  --bin: #d8521c;
+  --selected: #d3eef4;
+  --header-bg: linear-gradient(90deg, #1a88c4 0%, #0652b0 100%);
+  --header-text: #ffffff;
+  --header-muted: #d5ebf6;
+  --header-border: transparent;
+  --header-hover: rgb(255 255 255 / 16%);
+  --header-active-bg: rgb(255 255 255 / 22%);
+  --header-active-text: #ffffff;
+}
+
+:root[data-theme='calm'] {
+  --bg: #f1ebe0;
+  --surface: #faf6ef;
+  --surface-alt: #efe8db;
+  --surface-hover: #e9e0cf;
+  --text: #34302a;
+  --text-muted: #6c6459;
+  --border: #dcd2c1;
+  --border-strong: #c3b7a2;
+  --accent: #4a6b53;
+  --accent-hover: #3c5a45;
+  --accent-text: #fdfbf7;
+  --accent-alt: #8a5a3c;
+  --accent-soft: #e2ecdf;
+  --positive: #3f6f4a;
+  --negative: #9a4636;
+  --focus: #a7642c;
+  --shadow: 0 1px 2px rgb(52 48 42 / 12%);
+  --shadow-pop: 0 6px 18px rgb(52 48 42 / 16%);
+  --court-floor: #ecdec4;
+  --court-line: #9c8663;
+  --bin: #8c4a3a;
+  --selected: #e4ecdf;
+  --header-bg: var(--surface);
+  --header-text: var(--text);
+  --header-muted: var(--text-muted);
+  --header-border: var(--border);
+  --header-hover: var(--surface-hover);
+  --header-active-bg: var(--accent-soft);
+  --header-active-text: var(--text);
+}
+
+:root[data-theme='dusk'] {
+  --bg: #171a20;
+  --surface: #1f242c;
+  --surface-alt: #262c35;
+  --surface-hover: #2d343f;
+  --text: #d6dae1;
+  --text-muted: #98a1ae;
+  --border: #333b46;
+  --border-strong: #47515f;
+  --accent: #6f9c7d;
+  --accent-hover: #82b090;
+  --accent-text: #12161b;
+  --accent-alt: #c9915f;
+  --accent-soft: #26332b;
+  --positive: #7cb28c;
+  --negative: #d1806f;
+  --focus: #d9a05c;
+  --shadow: 0 1px 2px rgb(0 0 0 / 45%);
+  --shadow-pop: 0 8px 22px rgb(0 0 0 / 55%);
+  --court-floor: #241f18;
+  --court-line: #6d5c44;
+  --bin: #d98b76;
+  --selected: #29342c;
+  --header-bg: var(--surface);
+  --header-text: var(--text);
+  --header-muted: var(--text-muted);
+  --header-border: var(--border);
+  --header-hover: var(--surface-hover);
+  --header-active-bg: var(--accent-soft);
+  --header-active-text: var(--text);
+}
+
+:root[data-theme='classic'] {
+  --bg: #f6f7fb;
+  --surface: #ffffff;
+  --surface-alt: #eef1f7;
+  --surface-hover: #eaf2ff;
+  --text: #172033;
+  --text-muted: #55607a;
+  --border: #e2e5ea;
+  --border-strong: #8992a3;
+  --accent: #1d5aa6;
+  --accent-hover: #164a8c;
+  --accent-text: #ffffff;
+  --accent-alt: #8a4b2a;
+  --accent-soft: #e3edfb;
+  --positive: #177a45;
+  --negative: #b22222;
+  --focus: #1d5aa6;
+  --shadow: 0 1px 3px rgb(0 0 0 / 13%);
+  --shadow-pop: 0 4px 14px rgb(0 0 0 / 18%);
+  --court-floor: #f7e6c4;
+  --court-line: #553322;
+  --bin: #b22222;
+  --selected: #e3edfb;
+  --header-bg: var(--surface);
+  --header-text: var(--text);
+  --header-muted: var(--text-muted);
+  --header-border: var(--border);
+  --header-hover: var(--surface-hover);
+  --header-active-bg: var(--accent-soft);
+  --header-active-text: var(--text);
+}
+
+/* Table density is independent of the palette so either theme can be scanned tightly. */
+:root,
+:root[data-density='comfortable'] {
+  --cell-y: 0.6rem;
+  --cell-x: 0.75rem;
+  --table-font: 0.95rem;
+}
+
+:root[data-density='compact'] {
+  --cell-y: 0.3rem;
+  --cell-x: 0.5rem;
+  --table-font: 0.875rem;
+}
