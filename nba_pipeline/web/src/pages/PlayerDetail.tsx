@@ -6,7 +6,7 @@ import type { Row } from '../api/types';
 import { AsyncState } from '../components/AsyncState';
 import { StatCards } from '../components/StatCards';
 import { PLAYER_COLUMNS, renderCell } from '../lib/columns';
-import { fmtCount, fmtNumber, fmtPercent } from '../lib/format';
+import { fmtCount, fmtNumber } from '../lib/format';
 
 interface PlayerDetailResponse {
   player: Row;
@@ -116,17 +116,16 @@ export function PlayerDetail() {
                       <tbody>
                         {Object.entries(result.deltas).map(([metric, delta]) => {
                           const column = PLAYER_COLUMNS.find(item => item.key === metric);
-                          const isPercent = metric.includes('PCT');
+                          // Deltas reuse the column's formatter so their precision matches the values compared.
+                          const change = delta === null || delta === undefined
+                            ? '—'
+                            : `${delta > 0 ? '+' : ''}${column ? renderCell(column, delta) : fmtNumber(delta, 1)}`;
                           return (
                             <tr key={metric}>
                               <th scope="row">{column?.label ?? metric}</th>
                               <td className="numeric">{column ? renderCell(column, result.selected[metric]) : '—'}</td>
                               <td className="numeric">{column ? renderCell(column, result.compare_to[metric]) : '—'}</td>
-                              <td className="numeric">
-                                {delta === null || delta === undefined
-                                  ? '—'
-                                  : `${delta > 0 ? '+' : ''}${isPercent ? fmtPercent(delta) : fmtNumber(delta, 1)}`}
-                              </td>
+                              <td className="numeric">{change}</td>
                             </tr>
                           );
                         })}

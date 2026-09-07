@@ -8,7 +8,7 @@ interface CourtProps {
   map: ShotMap;
   metric: BinMetric;
   onMetric: (metric: BinMetric) => void;
-  playerNames: Map<number, string>;
+  playerNames: ReadonlyMap<number, string>;
 }
 
 /** Distinct hues for multi-player point maps; makes and misses stay distinguishable by shape too. */
@@ -65,14 +65,6 @@ export function Court({ map, metric, onMetric, playerNames }: CourtProps) {
         }
       >
         <rect width="500" height="500" className="court-floor" />
-        <g className="court-lines" fill="none" strokeWidth="2">
-          <path d="M0 500H500" />
-          <path d="M170 500V312.5H330V500" />
-          <path d="M190 312.5A60 60 0 0 1 310 312.5" />
-          <path d="M232 462.5H268" />
-          <path d="M30 500V360.5A237.5 237.5 0 0 1 470 360.5V500" />
-          <circle cx="250" cy="450" r="7.5" />
-        </g>
 
         {map.mode === 'points'
           ? map.items.map((shot, index) => {
@@ -114,6 +106,16 @@ export function Court({ map, metric, onMetric, playerNames }: CourtProps) {
               ><title>{describe(bin)}</title></rect>
             );
           })}
+
+        {/* Court markings sit above the data so dense bins never hide the geometry. */}
+        <g className="court-lines" fill="none" strokeWidth="2" pointerEvents="none">
+          <path d="M0 500H500" />
+          <path d="M170 500V312.5H330V500" />
+          <path d="M190 312.5A60 60 0 0 1 310 312.5" />
+          <path d="M232 462.5H268" />
+          <path d="M30 500V360.5A237.5 237.5 0 0 1 470 360.5V500" />
+          <circle cx="250" cy="450" r="7.5" />
+        </g>
       </svg>
 
       {map.mode === 'bins' && (

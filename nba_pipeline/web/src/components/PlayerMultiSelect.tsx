@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, queryString } from '../api/client';
 import type { PlayerOption } from '../api/types';
+import { rememberPlayerNames, usePlayerNames } from '../lib/playerNames';
 
 interface PlayerMultiSelectProps {
   season: string;
@@ -32,17 +33,12 @@ export function PlayerMultiSelect({ season, selected, onChange, max }: PlayerMul
     enabled: term.length > 0,
   });
 
-  // Selected ids can arrive from a bookmarked URL, so resolve their names from the API.
-  const names = useQuery({
-    queryKey: ['player-names', selected.join(',')],
-    queryFn: () => api<{ items: PlayerOption[] }>(`/lookups/players?${queryString({ ids: selected.join(',') })}`),
-    enabled: selected.length > 0,
-  });
+  const names = usePlayerNames(selected);
+  const labelFor = (id: number) => names.get(id) ?? 'Loading…';
 
-  const labelFor = (id: number) => names.data?.items.find(item => item.PLAYER_ID === id)?.FULL_NAME ?? `Player ${id}`;
-
-  const add = (id: number) => {
-    if (!selected.includes(id) && !atCapacity) onChange([...selected, id]);
+  const add = (option: PlayerOption) => {
+    rememberPlayerNames([[option.PLAYER_ID, option.FULL_NAME]]);
+    if (!selected.includes(option.PLAYER_ID) && !atCapacity) onChange([...selected, option.PLAYER_ID]);
     setSearch('');
     inputRef.current?.focus();
   };
@@ -68,7 +64,7 @@ export function PlayerMultiSelect({ season, selected, onChange, max }: PlayerMul
           onKeyDown={event => {
             if (event.key === 'Enter' && results.length > 0) {
               event.preventDefault();
-              add(results[0].PLAYER_ID);
+              add(results[0]);
             }
             if (event.key === 'Backspace' && search === '' && selected.length > 0) {
               onChange(selected.slice(0, -1));
@@ -84,7 +80,7 @@ export function PlayerMultiSelect({ season, selected, onChange, max }: PlayerMul
           {suggestions.isSuccess && results.length === 0 && <li className="lookup-note">No further matches.</li>}
           {results.map(item => (
             <li key={item.PLAYER_ID}>
-              <button type="button" role="option" aria-selected={false} onClick={() => add(item.PLAYER_ID)}>
+              <button type="button" role="option" aria-selected={false} onClick={() => add(item)}>
                 {item.FULL_NAME}
               </button>
             </li>

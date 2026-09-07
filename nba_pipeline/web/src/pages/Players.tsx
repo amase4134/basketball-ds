@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api, queryString } from '../api/client';
@@ -10,6 +11,7 @@ import { SeasonSelect } from '../components/SeasonSelect';
 import { PlayerComparison } from '../components/PlayerComparison';
 import { PLAYER_COLUMNS, PLAYER_DEFAULT_HIDDEN } from '../lib/columns';
 import { fmtCount } from '../lib/format';
+import { rememberPlayerNames } from '../lib/playerNames';
 import { useCatalog, useResolvedSeason } from '../lib/useCatalog';
 import { filterParams, useTableState } from '../lib/useTableState';
 
@@ -34,6 +36,11 @@ export function Players() {
     enabled: Boolean(season),
     placeholderData: previous => previous,
   });
+
+  // Rows already carry names, so selecting one by checkbox labels its chip without a lookup.
+  useEffect(() => {
+    if (table.data) rememberPlayerNames(table.data.items.map(row => [Number(row.PLAYER_ID), String(row.PLAYER_NAME)] as const));
+  }, [table.data]);
 
   const openPlayer = (row: Row) => navigate(`/players/${row.PLAYER_ID}?season=${row.season}`);
 

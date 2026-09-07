@@ -40,6 +40,25 @@ Open http://127.0.0.1:8000. The API documents fixed shot-map bins (x −250…25
 y −50…420, 25-coordinate-unit cells) and limits raw player point maps to 5,000
 shots; broader results are aggregated server-side.
 
+### Explorer features
+
+- **Multi-player selection.** Add up to 12 players from the typeahead or the
+  table checkboxes. The selection drives a side-by-side comparison table with
+  the leader marked per metric, and carries over to the Shot Explorer, where
+  each player's shots are plotted in their own colour.
+- **Per-column filters.** Numeric columns take a min/max range, text columns a
+  substring match, and shot result/type a fixed choice. Filters are applied in
+  DuckDB, not in the browser.
+- **Column sorting and visibility.** Any allow-listed column sorts in either
+  direction with a deterministic secondary sort; non-key columns can be hidden.
+- **Appearance.** The header theme menu offers the branded palette, a warm
+  low-glare *Calm paper* theme, a dimmed *Dusk* theme, and the original
+  *Classic* palette, plus comfortable/compact table density. The choice is
+  stored per browser.
+
+Sort, filters, selection, paging, and hidden columns all live in the URL query
+string, so any view can be bookmarked or reloaded exactly as configured.
+
 Or with requirements only:
 
 ```bash

@@ -1,8 +1,8 @@
-import { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api, queryString } from '../api/client';
-import type { Paged, PlayerOption, ShotMap, ShotSummary } from '../api/types';
+import type { Paged, ShotMap, ShotSummary } from '../api/types';
+import { usePlayerNames } from '../lib/playerNames';
 import { AsyncState } from '../components/AsyncState';
 import { Court, type BinMetric } from '../components/Court';
 import { DataTable } from '../components/DataTable';
@@ -58,15 +58,7 @@ export function Shots() {
     placeholderData: previous => previous,
   });
 
-  const names = useQuery({
-    queryKey: ['player-names', state.players.join(',')],
-    queryFn: () => api<{ items: PlayerOption[] }>(`/lookups/players?${queryString({ ids: state.players.join(',') })}`),
-    enabled: state.players.length > 0,
-  });
-  const playerNames = useMemo(
-    () => new Map((names.data?.items ?? []).map(item => [item.PLAYER_ID, item.FULL_NAME])),
-    [names.data],
-  );
+  const playerNames = usePlayerNames(state.players);
 
   return (
     <>
