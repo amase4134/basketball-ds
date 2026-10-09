@@ -91,6 +91,53 @@ python -m nba_pipeline list-seasons
 
 Shot charts are pulled only for players with **≥500 total season minutes** in that season’s `player_season_stats` (configurable via `--min-minutes`). Rate stats are per-100 possessions; `MIN` is merged from Totals mode so the filter works as expected.
 
+## Check data quality
+
+```bash
+# Current season: completeness + junk checks, exits non-zero on problems
+python -m nba_pipeline check
+
+# One season
+python -m nba_pipeline check --season 2023-24
+
+# Also require a successful refresh at or after a timestamp
+python -m nba_pipeline check --since 2026-10-09T08:00:00Z
+```
+
+Reads curated Parquet and `refresh_log` only — never calls the API. It fails when a
+dataset or season partition is missing, the last refresh logged an error, row counts
+fall under their floors (players 1,000; teams 30; season partitions non-empty), a pull
+comes in under half the previous successful one, or the data is junk: duplicate/null
+ids, negative `MIN` or `SHOT_DISTANCE`, `SHOT_MADE_FLAG` outside 0/1, or shot
+coordinates outside the court bounds. Court bounds allow a 1% share, since genuine
+full-court heaves (~0.1% of a season) clear them.
+
+## Daily automation
+
+[`scripts/daily_refresh.sh`](scripts/daily_refresh.sh) runs `refresh --force` for the
+current season, then `check --since` the run's start time. The check runs even when the
+refresh fails, and the script exits non-zero if either step did. A lock directory stops
+a second run from starting while a long shot-chart pull is still going. Output lands in
+the gitignored `logs/` directory.
+
+A user LaunchAgent runs it at 8:00am local, every day:
+
+```bash
+cp scripts/com.basketballds.nba-refresh.plist ~/Library/LaunchAgents/
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.basketballds.nba-refresh.plist
+
+# Status, manual run, logs
+launchctl print "gui/$(id -u)/com.basketballds.nba-refresh"
+launchctl kickstart -p "gui/$(id -u)/com.basketballds.nba-refresh"
+tail -f logs/daily_refresh.log
+
+# Stop it (re-bootstrap to turn it back on)
+launchctl bootout "gui/$(id -u)/com.basketballds.nba-refresh"
+```
+
+The plist hard-codes the absolute project path, so edit it if the repo moves. If the
+external volume is not mounted at 8:00am the script logs that and exits without running.
+
 ## Dataset dictionary
 
 | Dataset | Source | Curated path | Notes |
@@ -136,11 +183,13 @@ nba_pipeline/
     extract/           # static, player_stats, shot_charts
     transform/clean.py
     load/              # parquet writers, duckdb views
+    quality.py         # post-refresh completeness / junk checks
     cli.py
   data/
     raw/
     curated/
     meta/
+  scripts/             # daily refresh script + LaunchAgent plist
   notebooks/
 ```
 
@@ -150,4 +199,4 @@ The client sleeps ~0.8s between successful calls and retries with exponential ba
 
 ## Phase 2 (deferred)
 
-Play-by-play / win probability, game logs, scheduled cron refresh, cloud sync.
+Play-by-play / win probability, game logs, cloud sync.

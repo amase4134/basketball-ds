@@ -11,6 +11,7 @@ from nba_pipeline.config import DATASETS, Settings, default_seasons, settings
 from nba_pipeline.extract.player_stats import extract_player_season_stats
 from nba_pipeline.extract.shot_charts import extract_shot_charts
 from nba_pipeline.extract.static import extract_players, extract_teams
+from nba_pipeline.quality import check_warehouse, parse_since
 
 app = typer.Typer(
     name="nba-pipeline",
@@ -119,6 +120,39 @@ def refresh(
         )
 
     typer.echo("Refresh complete.")
+
+
+@app.command()
+def check(
+    season: Optional[str] = typer.Option(
+        None,
+        "--season",
+        help="Season to inspect. Default: current (latest) season.",
+    ),
+    since: Optional[str] = typer.Option(
+        None,
+        "--since",
+        help="ISO timestamp; require a successful refresh at or after it.",
+    ),
+) -> None:
+    """Verify curated data is complete and free of obvious junk."""
+    cfg = Settings(seasons=default_seasons(5))
+    target = season or cfg.seasons[-1]
+
+    try:
+        cutoff = parse_since(since) if since else None
+    except ValueError as exc:
+        raise typer.BadParameter(f"Invalid --since timestamp: {exc}") from exc
+
+    findings = check_warehouse(cfg=cfg, season=target, since=cutoff)
+    if not findings:
+        typer.echo(f"Data check passed for season {target}.")
+        return
+
+    typer.echo(f"Data check FAILED for season {target}: {len(findings)} problem(s).")
+    for finding in findings:
+        typer.echo(f"  - {finding.format()}")
+    raise typer.Exit(code=1)
 
 
 @app.command("list-seasons")

@@ -10,6 +10,10 @@ from nba_pipeline.config import PLAYER_STATS_KEEP_PREFIXES, SHOT_CHART_COLUMNS
 
 logger = logging.getLogger(__name__)
 
+# Court coordinates in tenths of a foot. Full-court heaves do clear the LOC_Y
+# bound legitimately, so callers gating on this should allow a small share.
+SHOT_LOCATION_BOUNDS = {"LOC_X": (-300, 300), "LOC_Y": (-100, 500)}
+
 
 def clean_players(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
@@ -105,20 +109,44 @@ def validate_players(df: pd.DataFrame) -> list[str]:
     return warnings
 
 
+def out_of_bounds_shot_counts(df: pd.DataFrame) -> dict[str, int]:
+    """Count shots outside the court coordinate bounds, per location column."""
+    counts: dict[str, int] = {}
+    for column, (low, high) in SHOT_LOCATION_BOUNDS.items():
+        if column in df.columns:
+            counts[column] = int(((df[column] < low) | (df[column] > high)).sum())
+    return counts
+
+
 def validate_shot_charts(df: pd.DataFrame) -> list[str]:
     warnings: list[str] = []
     if df.empty:
         warnings.append("shot_charts partition is empty")
         return warnings
-    if "LOC_X" in df.columns:
-        bad_x = ((df["LOC_X"] < -300) | (df["LOC_X"] > 300)).sum()
-        if bad_x:
-            warnings.append(f"{bad_x} shots with LOC_X outside [-300, 300]")
-    if "LOC_Y" in df.columns:
-        bad_y = ((df["LOC_Y"] < -100) | (df["LOC_Y"] > 500)).sum()
-        if bad_y:
-            warnings.append(f"{bad_y} shots with LOC_Y outside [-100, 500]")
+    for column, count in out_of_bounds_shot_counts(df).items():
+        if count:
+            low, high = SHOT_LOCATION_BOUNDS[column]
+            warnings.append(f"{count} shots with {column} outside [{low}, {high}]")
     return warnings
+
+
+def row_count_drop_message(
+    dataset: str,
+    season: str | None,
+    new_count: int,
+    previous: int | None,
+    *,
+    threshold: float = 0.5,
+) -> str | None:
+    """Describe a sharp row-count drop, or None when the counts look sane."""
+    if previous is None or previous == 0:
+        return None
+    if new_count >= previous * threshold:
+        return None
+    return (
+        f"{dataset} season={season} row count dropped sharply: "
+        f"{previous} → {new_count}"
+    )
 
 
 def warn_row_count_drop(
@@ -129,13 +157,8 @@ def warn_row_count_drop(
     *,
     threshold: float = 0.5,
 ) -> None:
-    if previous is None or previous == 0:
-        return
-    if new_count < previous * threshold:
-        logger.warning(
-            "%s season=%s row count dropped sharply: %s → %s",
-            dataset,
-            season,
-            previous,
-            new_count,
-        )
+    message = row_count_drop_message(
+        dataset, season, new_count, previous, threshold=threshold
+    )
+    if message:
+        logger.warning("%s", message)
