@@ -2,7 +2,9 @@
 
 Local, refreshable NBA analytics warehouse: **`nba_api` → Parquet → DuckDB**.
 
-Built for personal data science projects (shot charts, player archetype clustering). Historical window defaults to the **last 5 NBA seasons**.
+Built for personal data science projects (shot charts, player archetype clustering, team win
+prediction). The warehouse holds the **5 completed seasons before the current one plus the current
+season** — so projecting 2026-27 trains on 2021-22 through 2025-26.
 
 ## Setup
 
@@ -55,6 +57,11 @@ shots; broader results are aggregated server-side.
   low-glare *Calm paper* theme, a dimmed *Dusk* theme, and the original
   *Classic* palette, plus comfortable/compact table density. The choice is
   stored per browser.
+
+- **Win Predictor.** A dumbbell chart comparing each team's pre-season projection,
+  updated projection, and current 82-game pace; accuracy KPI cards; a season-long
+  error trend with a per-team actual-versus-expected trajectory; and a sortable
+  30-team table that flags who is beating or trailing their forecast.
 
 Sort, filters, selection, paging, and hidden columns all live in the URL query
 string, so any view can be bookmarked or reloaded exactly as configured.
@@ -112,6 +119,89 @@ ids, negative `MIN` or `SHOT_DISTANCE`, `SHOT_MADE_FLAG` outside 0/1, or shot
 coordinates outside the court bounds. Court bounds allow a 1% share, since genuine
 full-court heaves (~0.1% of a season) clear them.
 
+## Team win predictor
+
+Projects every team's 82-game win total for the current season and scores itself against the games
+actually played. Two ridge regressions, both trained on the 5 completed seasons before the target:
+
+| Model | Learns from | Used for |
+|---|---|---|
+| **Pre-season** | Previous season's efficiency, four factors, record, and minute-weighted roster strength | A locked 82-game projection, fixed before opening night |
+| **In-season profile** | A season's own efficiency profile against its final win total | A live projection that re-reads each team as games are played |
+
+Both are scored by leave-one-season-out cross-validation, and every projection is reconciled so the
+league totals 1,230 wins — one team's win is always another's loss.
+
+The live projection blends the two: wins already banked are certain, and the remaining
+`82 − GP` games are projected at a rate that shifts from the pre-season prior toward the in-season
+profile as the sample grows, reaching full trust at 40 games.
+
+```bash
+# Fit the models and write the locked pre-season projection
+python -m nba_pipeline train-wins --target-season 2026-27
+
+# Re-score against results so far and append a dated snapshot
+python -m nba_pipeline check-wins              # refreshes team stats first
+python -m nba_pipeline check-wins --offline    # curated Parquet only
+```
+
+`train-wins` prints cross-validated accuracy per model and per held-out season, then writes
+`data/curated/win_predictions/season=YYYY-YY/` and `data/meta/win_model_metrics.json`.
+`check-wins` prints league-wide accuracy plus a team-by-team table, and appends to
+`data/curated/win_prediction_history/`, keeping one row per team per day so the whole season's
+accuracy can be charted. Re-running on the same day replaces that day's rows rather than
+duplicating them.
+
+Tracked per team: games played, actual record, the wins each model expected by this point,
+the error against each, the current 82-game pace, and the blended final projection.
+League-wide: MAE and RMSE for both models, 82-game pace error, Spearman rank correlation against
+the real standings, and playoff-tier hit rate.
+
+Before opening night the NBA API returns no rows for the season at all, so the pipeline writes a
+30-team partition at zero games and the tracker reports the locked projection with accuracy
+pending.
+
+## Weekly email report
+
+A digest of how the predictor is doing, mailed every **Friday at 8:30am**:
+
+```bash
+python -m nba_pipeline send-win-report                  # to the configured recipient
+python -m nba_pipeline send-win-report --dry-run        # render and archive only
+python -m nba_pipeline send-win-report --to me@example.com
+```
+
+It covers the accuracy scorecard, the week-over-week change in each metric, the five biggest
+over- and underperformers, and the full 30-team table. Each run also archives the HTML to
+`data/meta/reports/weekly_win_report_YYYY-MM-DD.html`.
+
+Configure delivery once:
+
+```bash
+cp .env.example .env
+```
+
+Gmail rejects account passwords over SMTP, so create an **App Password** (requires 2-Step
+Verification) at <https://myaccount.google.com/apppasswords>, then paste it into
+`SMTP_APP_PASSWORD` in `.env`. The file is gitignored. With no app password set, the report falls
+back to macOS `Mail.app` using the account already signed in on this Mac, so delivery works before
+any secret is configured.
+
+Install the Friday LaunchAgent:
+
+```bash
+cp scripts/com.basketballds.nba-weekly-report.plist ~/Library/LaunchAgents/
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.basketballds.nba-weekly-report.plist
+
+# Status, manual run, logs
+launchctl print "gui/$(id -u)/com.basketballds.nba-weekly-report"
+launchctl kickstart -p "gui/$(id -u)/com.basketballds.nba-weekly-report"
+tail -f logs/weekly_report.log
+
+# Stop it (re-bootstrap to turn it back on)
+launchctl bootout "gui/$(id -u)/com.basketballds.nba-weekly-report"
+```
+
 ## Daily automation
 
 [`scripts/daily_refresh.sh`](scripts/daily_refresh.sh) runs `refresh --force` for the
@@ -146,14 +236,29 @@ external volume is not mounted at 8:00am the script logs that and exits without 
 | `teams` | `nba_api.stats.static.teams` | `data/curated/teams/teams.parquet` | Team directory |
 | `player_season_stats` | `LeagueDashPlayerStats` (Per100Possessions rates + Totals `MIN`) | `data/curated/player_season_stats/season=YYYY-YY/` | Archetype clustering; `MIN` is season total minutes |
 | `shot_charts` | `ShotChartDetail` (FGA, `team_id=0`) | `data/curated/shot_charts/season=YYYY-YY/` | `LOC_X` / `LOC_Y` shot locations |
+| `team_season_stats` | `LeagueDashTeamStats` (Base Per100 + Advanced) | `data/curated/team_season_stats/season=YYYY-YY/` | Win predictor inputs: record, ratings, four factors |
+| `win_predictions` | Derived by `train-wins` / `check-wins` | `data/curated/win_predictions/season=YYYY-YY/` | Current projection and error per team |
+| `win_prediction_history` | Derived by `check-wins` | `data/curated/win_prediction_history/season=YYYY-YY/` | Dated snapshots, one row per team per day |
 
-Raw API dumps land under `data/raw/`. Refresh outcomes append to `data/meta/refresh_log.parquet`.
+Raw API dumps land under `data/raw/`. Refresh outcomes append to `data/meta/refresh_log.parquet`,
+model accuracy to `data/meta/win_model_metrics.json`, and emailed digests to `data/meta/reports/`.
 
 ### Shot chart columns (curated)
 
 `PLAYER_ID`, `PLAYER_NAME`, `TEAM_ID`, `GAME_ID`, `GAME_DATE`, `EVENT_TYPE`, `SHOT_MADE_FLAG`, `SHOT_TYPE`, `SHOT_DISTANCE`, `LOC_X`, `LOC_Y` (+ hive `season`).
 
 Court coordinates (from NBA API): `LOC_X` ≈ −250…250, `LOC_Y` ≈ −50…400+ (tenths of a foot).
+
+### Team stat columns (curated)
+
+Identity and record: `TEAM_ID`, `TEAM_NAME`, `TEAM_ABBREVIATION`, `GP`, `W`, `L`, `W_PCT`.
+
+Efficiency and four factors: `OFF_RATING`, `DEF_RATING`, `NET_RATING`, `PACE`, `TS_PCT`, `EFG_PCT`,
+`AST_PCT`, `AST_TO`, `OREB_PCT`, `DREB_PCT`, `REB_PCT`, `TM_TOV_PCT`, `PLUS_MINUS`, plus per-100
+box score rates (+ hive `season`).
+
+`FTA_RATE` is derived as `FTA / FGA` — the NBA's own definition — rather than pulled from a third
+measure type, which keeps the refresh to two API calls per season.
 
 ## Query with DuckDB
 
@@ -180,16 +285,21 @@ nba_pipeline/
   src/nba_pipeline/
     config.py
     client.py          # retry / sleep
-    extract/           # static, player_stats, shot_charts
+    extract/           # static, player_stats, team_stats, shot_charts
     transform/clean.py
     load/              # parquet writers, duckdb views
+    modeling/          # win prediction features, models, accuracy tracking
+    reporting/         # weekly report builder + email transport
+    web_api/           # read-only FastAPI service
     quality.py         # post-refresh completeness / junk checks
     cli.py
+  web/                 # React + Vite Explorer
   data/
     raw/
     curated/
-    meta/
-  scripts/             # daily refresh script + LaunchAgent plist
+    meta/               # refresh log, model metrics, archived reports
+  scripts/             # daily refresh + weekly report scripts & LaunchAgent plists
+  tests/
   notebooks/
 ```
 

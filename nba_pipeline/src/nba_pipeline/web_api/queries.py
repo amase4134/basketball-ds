@@ -1,8 +1,12 @@
 """Validated, parameterized query helpers for the local Explorer API."""
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any
+
+import numpy as np
+import pandas as pd
 
 from nba_pipeline.config import Settings
 from nba_pipeline.load.duckdb_views import connect
@@ -15,6 +19,33 @@ PLAYER_LIKES = {c: c for c in "PLAYER_NAME TEAM_ABBREVIATION".split()}
 SHOT_RANGES = {c: c for c in "SHOT_DISTANCE LOC_X LOC_Y".split()}
 MAX_SELECTED_IDS = 12
 
+PREDICTION_COLUMNS = (
+    "TEAM_ID, TEAM_NAME, TEAM_ABBREVIATION, games_played, actual_wins, actual_losses, "
+    "actual_win_pct, current_82_pace, net_rating, preseason_pred_wins, "
+    "inseason_talent_wins_82, preseason_expected_wins_at_gp, "
+    "inseason_expected_wins_at_gp, preseason_win_error_at_gp, "
+    "inseason_win_error_at_gp, profile_trust, updated_pred_wins, preseason_rank, "
+    "updated_rank, actual_rank, season"
+)
+PREDICTION_SORTS = {
+    c: c
+    for c in (
+        "TEAM_ABBREVIATION TEAM_NAME games_played actual_wins actual_losses "
+        "actual_win_pct current_82_pace net_rating preseason_pred_wins "
+        "inseason_talent_wins_82 preseason_expected_wins_at_gp "
+        "inseason_expected_wins_at_gp preseason_win_error_at_gp "
+        "inseason_win_error_at_gp updated_pred_wins preseason_rank updated_rank"
+    ).split()
+}
+DATASET_NAMES = (
+    "players",
+    "teams",
+    "player_season_stats",
+    "team_season_stats",
+    "shot_charts",
+    "win_predictions",
+)
+
 class InvalidFilter(ValueError):
     """A user-supplied selection or column range could not be validated."""
 
@@ -23,7 +54,15 @@ class DataUnavailable(Exception):
         self.dataset, self.detail = dataset, detail or f"The {dataset} dataset is unavailable."
 
 def available(cfg: Settings, dataset: str) -> bool:
-    paths = {"players": cfg.curated_dir / "players" / "players.parquet", "teams": cfg.curated_dir / "teams" / "teams.parquet", "player_season_stats": cfg.curated_dir / "player_season_stats", "shot_charts": cfg.curated_dir / "shot_charts"}
+    paths = {
+        "players": cfg.curated_dir / "players" / "players.parquet",
+        "teams": cfg.curated_dir / "teams" / "teams.parquet",
+        "player_season_stats": cfg.curated_dir / "player_season_stats",
+        "team_season_stats": cfg.curated_dir / "team_season_stats",
+        "shot_charts": cfg.curated_dir / "shot_charts",
+        "win_predictions": cfg.curated_dir / "win_predictions",
+        "win_prediction_history": cfg.curated_dir / "win_prediction_history",
+    }
     path = paths[dataset]
     return path.exists() if path.suffix else any(path.rglob("*.parquet"))
 
@@ -35,6 +74,28 @@ def db(cfg: Settings): return connect(cfg)
 def rows(cursor) -> list[dict[str, Any]]:
     columns = [c[0] for c in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+def jsonable(value: Any) -> Any:
+    """Replace NaN/Inf with None so pandas-derived payloads can serialise.
+
+    DuckDB hands back None for SQL NULL, but a frame read straight from Parquet
+    carries NaN, which is not valid JSON.
+    """
+    if isinstance(value, dict): return {k: jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)): return [jsonable(v) for v in value]
+    if isinstance(value, float):
+        return None if math.isnan(value) or math.isinf(value) else value
+    if isinstance(value, (np.integer,)): return int(value)
+    if isinstance(value, (np.floating,)):
+        number = float(value)
+        return None if math.isnan(number) or math.isinf(number) else number
+    if isinstance(value, np.bool_): return bool(value)
+    if value is pd.NaT or (value is not None and value is pd.NA): return None
+    return value
+
+def frame_records(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    """A DataFrame as JSON-safe records."""
+    return jsonable(frame.to_dict("records"))
 
 def id_list(raw: str | None, limit: int = MAX_SELECTED_IDS) -> list[int]:
     """Parse a comma-separated selection of integer ids, preserving first-seen order."""

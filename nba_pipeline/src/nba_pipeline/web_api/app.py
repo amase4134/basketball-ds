@@ -9,8 +9,9 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 
-from nba_pipeline.config import Settings
-from .queries import DataUnavailable, InvalidFilter, MAX_SELECTED_IDS, PLAYER_COLUMNS, PLAYER_LIKES, PLAYER_RANGES, PLAYER_SORTS, SHOT_RANGES, SHOT_SORTS, contains_where, db, id_list, parse_bounds, range_where, require, rows, safe_execute, shot_where, available
+from nba_pipeline.config import GAMES_PER_SEASON, Settings
+from nba_pipeline.modeling import tracking
+from .queries import DATASET_NAMES, DataUnavailable, InvalidFilter, MAX_SELECTED_IDS, PLAYER_COLUMNS, PLAYER_LIKES, PLAYER_RANGES, PLAYER_SORTS, PREDICTION_COLUMNS, PREDICTION_SORTS, SHOT_RANGES, SHOT_SORTS, contains_where, db, frame_records, id_list, jsonable, parse_bounds, range_where, require, rows, safe_execute, shot_where, available
 
 GRID = {"x_min": -250, "x_max": 250, "y_min": -50, "y_max": 420, "cell_size": 25, "point_limit": 5000}
 COMPARE_METRICS = ["GP", "MIN", "PTS", "FGA", "FG_PCT", "FG3A", "FG3_PCT", "REB", "AST", "TOV", "STL", "BLK", "PLUS_MINUS"]
@@ -39,16 +40,16 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
         require(cfg, "player_season_stats")
         return [r[0] for r in connection.execute("SELECT DISTINCT season FROM player_season_stats ORDER BY season DESC").fetchall()]
     @app.get("/api/v1/health")
-    def health(): return {"status": "ok", "datasets": {d: available(cfg, d) for d in ("players", "teams", "player_season_stats", "shot_charts")}}
+    def health(): return {"status": "ok", "datasets": {d: available(cfg, d) for d in DATASET_NAMES}}
     @app.get("/api/v1/catalog")
     def catalog():
         with con() as connection:
             datasets = {}
-            for name in ("players", "teams", "player_season_stats", "shot_charts"):
+            for name in DATASET_NAMES:
                 if available(cfg, name):
                     datasets[name] = {"available": True, "rows": connection.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]}
                 else: datasets[name] = {"available": False, "rows": 0}
-            result = {"seasons": seasons(connection), "datasets": datasets, "grid": GRID, "limits": {"max_selected_players": MAX_SELECTED_IDS, "page_sizes": [25, 50, 100]}, "shot_coverage": "Regular-season field-goal attempts for players eligible during extraction."}
+            result = {"seasons": seasons(connection), "datasets": datasets, "grid": GRID, "limits": {"max_selected_players": MAX_SELECTED_IDS, "page_sizes": [25, 50, 100]}, "shot_coverage": "Regular-season field-goal attempts for players eligible during extraction.", "target_season": cfg.target_season, "training_seasons": cfg.training_seasons}
             if (cfg.meta_dir / "refresh_log.parquet").exists():
                 result["refresh_log"] = rows(connection.execute("SELECT dataset, season, row_count, status, message, timestamp FROM refresh_log ORDER BY timestamp DESC LIMIT 20"))
             return result
@@ -161,6 +162,48 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
             total=safe_execute(connection,"SELECT COUNT(*) FROM shot_charts"+where,params).fetchone()[0]
             data=rows(safe_execute(connection,"SELECT PLAYER_ID, PLAYER_NAME, TEAM_ID, GAME_ID, GAME_DATE, EVENT_TYPE, SHOT_MADE_FLAG, SHOT_TYPE, SHOT_DISTANCE, LOC_X, LOC_Y FROM shot_charts"+where+f" ORDER BY {SHOT_SORTS[sort]} {direction.upper()} NULLS LAST, GAME_ID LIMIT ? OFFSET ?",params+[page_size,(page-1)*page_size]))
             return {"items":data,"meta":{"page":page,"page_size":page_size,"total":total,"sort":sort,"direction":direction,"filters":{"season":season,"player_ids":selected}}}
+    def prediction_seasons(connection) -> list[str]:
+        require(cfg, "win_predictions")
+        return [r[0] for r in connection.execute("SELECT DISTINCT season FROM win_predictions ORDER BY season DESC").fetchall()]
+
+    def training_accuracy() -> dict:
+        """Cross-validated accuracy recorded when the model was last fitted."""
+        stored = tracking.load_metrics(cfg) or {}
+        def block(key: str) -> dict:
+            source = stored.get(key) or {}
+            return {m: source.get(m) for m in ("rows", "mae", "rmse", "r2", "alpha")}
+        return {"trained_at": stored.get("trained_at"), "training_seasons": stored.get("training_seasons") or cfg.training_seasons, "preseason_model": block("preseason_model"), "profile_model": block("profile_model")}
+
+    @app.get("/api/v1/predictions/wins")
+    def win_predictions(season: str | None = None, sort: str = "updated_pred_wins", direction: Literal["asc", "desc"] = "desc"):
+        require(cfg, "win_predictions")
+        if sort not in PREDICTION_SORTS: raise HTTPException(422, "Unsupported prediction sort column")
+        with con() as connection:
+            known = prediction_seasons(connection)
+            target = season or (known[0] if known else cfg.target_season)
+            if target not in known: raise HTTPException(404, f"No win predictions for season {target}")
+            items = rows(safe_execute(connection, f"SELECT {PREDICTION_COLUMNS} FROM win_predictions WHERE season = ? ORDER BY {PREDICTION_SORTS[sort]} {direction.upper()} NULLS LAST, TEAM_ID", [target]))
+        # Accuracy is summarised from the same frame the UI renders, so the
+        # cards and the table can never disagree.
+        frame = tracking.load_predictions(target, cfg=cfg)
+        summary = jsonable(tracking.summarise(frame))
+        summary["training"] = jsonable(training_accuracy())
+        return {"items": jsonable(items), "summary": summary, "meta": {"season": target, "seasons": known, "sort": sort, "direction": direction, "games_per_season": GAMES_PER_SEASON, "training_seasons": summary["training"]["training_seasons"]}}
+
+    @app.get("/api/v1/predictions/wins/history")
+    def win_prediction_history(season: str | None = None, team_id: int | None = None):
+        require(cfg, "win_prediction_history")
+        target = season or cfg.target_season
+        history = tracking.load_history(target, cfg=cfg)
+        if history.empty: raise HTTPException(404, f"No prediction history for season {target}")
+        timeline = tracking.accuracy_timeline(history)
+        payload = {"items": frame_records(timeline), "meta": {"season": target, "snapshots": int(len(timeline)), "games_per_season": GAMES_PER_SEASON}}
+        if team_id is not None:
+            team = tracking.team_timeline(history, team_id)
+            if team.empty: raise HTTPException(404, f"No prediction history for team {team_id}")
+            payload["team"] = {"TEAM_ID": team_id, "items": frame_records(team)}
+        return payload
+
     web_dist=cfg.project_root / 'web' / 'dist'
     if web_dist.exists():
         app.mount('/assets', StaticFiles(directory=web_dist/'assets'), name='assets')

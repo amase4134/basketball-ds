@@ -1,4 +1,5 @@
 .venv/
+.env
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -11,6 +12,7 @@ logs/
 data/raw/
 data/curated/**/*.parquet
 data/meta/*.parquet
+data/meta/reports/
 !data/raw/.gitkeep
 !data/meta/.gitkeep
 !data/curated/**/.gitkeep

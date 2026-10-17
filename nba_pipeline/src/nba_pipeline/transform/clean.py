@@ -6,7 +6,11 @@ import logging
 
 import pandas as pd
 
-from nba_pipeline.config import PLAYER_STATS_KEEP_PREFIXES, SHOT_CHART_COLUMNS
+from nba_pipeline.config import (
+    PLAYER_STATS_KEEP_PREFIXES,
+    SHOT_CHART_COLUMNS,
+    TEAM_STATS_COLUMNS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +86,33 @@ def clean_player_season_stats(df: pd.DataFrame, season: str) -> pd.DataFrame:
         out["TEAM_ID"] = pd.to_numeric(out["TEAM_ID"], errors="coerce").astype("Int64")
     if "MIN" in out.columns:
         out["MIN"] = pd.to_numeric(out["MIN"], errors="coerce")
+    return out.reset_index(drop=True)
+
+
+def clean_team_season_stats(df: pd.DataFrame, season: str) -> pd.DataFrame:
+    out = df.copy()
+    out["SEASON"] = season
+    if "TEAM_ID" in out.columns:
+        out["TEAM_ID"] = out["TEAM_ID"].astype("int64")
+    # The Advanced measure type omits FTA_RATE, which is simply FTA per FGA.
+    if "FTA_RATE" not in out.columns and {"FTA", "FGA"} <= set(out.columns):
+        attempts = pd.to_numeric(out["FGA"], errors="coerce")
+        out["FTA_RATE"] = pd.to_numeric(out["FTA"], errors="coerce") / attempts.where(
+            attempts != 0
+        )
+    for col in ("GP", "W", "L"):
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce").astype("Int64")
+    numeric = [
+        c
+        for c in TEAM_STATS_COLUMNS
+        if c in out.columns
+        and c not in {"SEASON", "TEAM_ID", "TEAM_NAME", "TEAM_ABBREVIATION", "GP", "W", "L"}
+    ]
+    for col in numeric:
+        out[col] = pd.to_numeric(out[col], errors="coerce")
+    cols = [c for c in TEAM_STATS_COLUMNS if c in out.columns]
+    out = out[cols].drop_duplicates(subset=["TEAM_ID"]).sort_values("TEAM_ID")
     return out.reset_index(drop=True)
 
 

@@ -17,14 +17,22 @@ def connect(cfg: Settings | None = None, database: str = ":memory:") -> duckdb.D
     return con
 
 
+# Curated datasets partitioned by season=YYYY-YY, exposed as hive-partitioned views.
+PARTITIONED_DATASETS = (
+    "player_season_stats",
+    "team_season_stats",
+    "shot_charts",
+    "win_predictions",
+    "win_prediction_history",
+)
+
+
 def register_views(con: duckdb.DuckDBPyConnection, cfg: Settings | None = None) -> None:
     cfg = cfg or settings
     curated = cfg.curated_dir
 
     players = curated / "players" / "players.parquet"
     teams = curated / "teams" / "teams.parquet"
-    stats_glob = str(curated / "player_season_stats" / "**" / "*.parquet")
-    shots_glob = str(curated / "shot_charts" / "**" / "*.parquet")
     refresh_log = cfg.meta_dir / "refresh_log.parquet"
 
     if players.exists():
@@ -36,17 +44,19 @@ def register_views(con: duckdb.DuckDBPyConnection, cfg: Settings | None = None) 
             f"CREATE OR REPLACE VIEW teams AS SELECT * FROM read_parquet('{_escape(teams)}')"
         )
 
-    if any((curated / "player_season_stats").rglob("*.parquet")):
+    for dataset in PARTITIONED_DATASETS:
+        directory = curated / dataset
+        if not any(directory.rglob("*.parquet")):
+            continue
+        glob = str(directory / "**" / "*.parquet")
+        # union_by_name keeps a season readable when its columns differ, which
+        # happens for a target season that has not tipped off yet.
         con.execute(
-            "CREATE OR REPLACE VIEW player_season_stats AS "
-            f"SELECT * FROM read_parquet('{_escape(stats_glob)}', hive_partitioning = true)"
+            f"CREATE OR REPLACE VIEW {dataset} AS "
+            f"SELECT * FROM read_parquet('{_escape(glob)}', "
+            "hive_partitioning = true, union_by_name = true)"
         )
 
-    if any((curated / "shot_charts").rglob("*.parquet")):
-        con.execute(
-            "CREATE OR REPLACE VIEW shot_charts AS "
-            f"SELECT * FROM read_parquet('{_escape(shots_glob)}', hive_partitioning = true)"
-        )
     if refresh_log.exists():
         con.execute(
             f"CREATE OR REPLACE VIEW refresh_log AS SELECT * FROM read_parquet('{_escape(refresh_log)}')"

@@ -467,6 +467,51 @@ th[aria-sort]:not([aria-sort='none']) { background: var(--accent-soft); }
   font-size: 0.85rem;
 }
 
+/* Win predictor ---------------------------------------------------------- */
+
+.win-chart svg { max-width: 100%; }
+.win-chart-team {
+  fill: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.win-chart-stripe { fill: var(--surface-alt); }
+.win-chart-link { stroke: var(--border-strong); stroke-width: 2; }
+.legend-dot { border-radius: 50%; }
+
+td.is-above { color: var(--positive); font-weight: 600; }
+td.is-below { color: var(--negative); font-weight: 600; }
+
+.surprise-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+.surprise-card {
+  padding: 0.9rem 1.1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  box-shadow: var(--shadow);
+}
+.surprise-card h3 { margin: 0 0 0.6rem; font-size: 0.95rem; }
+.surprise-card ol { margin: 0; padding-left: 1.3rem; }
+.surprise-card li { margin-bottom: 0.5rem; }
+.surprise-card small { display: block; color: var(--text-muted); font-size: 0.82rem; }
+.surprise-record {
+  margin-left: 0.45rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.surprise-delta {
+  margin-left: 0.45rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.surprise-delta.is-positive { color: var(--positive); }
+.surprise-delta.is-negative { color: var(--negative); }
+
 /* Responsive ------------------------------------------------------------- */
 
 @media (max-width: 900px) {

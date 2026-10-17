@@ -4,6 +4,7 @@ import { Dashboard } from '../pages/Dashboard';
 import { Players } from '../pages/Players';
 import { PlayerDetail } from '../pages/PlayerDetail';
 import { Shots } from '../pages/Shots';
+import { WinPredictions } from '../pages/WinPredictions';
 import { ThemeMenu } from './ThemeMenu';
 
 export function AppShell() {
@@ -21,6 +22,7 @@ export function AppShell() {
         <nav aria-label="Main">
           <NavLink to="/players">Players</NavLink>
           <NavLink to="/shots">Shot Explorer</NavLink>
+          <NavLink to="/predictions">Win Predictor</NavLink>
         </nav>
         <ThemeMenu />
       </header>
@@ -30,6 +32,7 @@ export function AppShell() {
           <Route path="/players" element={<Players />} />
           <Route path="/players/:playerId" element={<PlayerDetail />} />
           <Route path="/shots" element={<Shots />} />
+          <Route path="/predictions" element={<WinPredictions />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>

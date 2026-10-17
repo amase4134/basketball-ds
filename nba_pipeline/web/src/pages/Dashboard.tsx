@@ -56,6 +56,7 @@ export function Dashboard() {
               <p className="selection-actions">
                 <Link className="button" to={`/players?season=${season}`}>Explore players</Link>
                 <Link className="button" to={`/shots?season=${season}`}>Explore shots</Link>
+                <Link className="button" to="/predictions">Win predictor</Link>
               </p>
             </>
           );

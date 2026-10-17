@@ -57,7 +57,17 @@ else
     log "data check FAILED with exit ${check_status}"
 fi
 
-if [ "${refresh_status}" -ne 0 ] || [ "${check_status}" -ne 0 ]; then
+# Score the win predictor against the games played so far. The refresh above
+# already pulled today's team stats, so this reads curated Parquet only.
+wins_status=0
+python -m nba_pipeline check-wins --offline || wins_status=$?
+if [ "${wins_status}" -eq 0 ]; then
+    log "win predictor snapshot recorded"
+else
+    log "win predictor check FAILED with exit ${wins_status}"
+fi
+
+if [ "${refresh_status}" -ne 0 ] || [ "${check_status}" -ne 0 ] || [ "${wins_status}" -ne 0 ]; then
     log "=== run finished with problems ==="
     exit 1
 fi
