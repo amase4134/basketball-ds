@@ -116,6 +116,23 @@ def clean_team_season_stats(df: pd.DataFrame, season: str) -> pd.DataFrame:
     return out.reset_index(drop=True)
 
 
+def clean_rosters(df: pd.DataFrame) -> pd.DataFrame:
+    """One row per rostered player from CommonAllPlayers; free agents dropped."""
+    out = df.rename(
+        columns={"PERSON_ID": "PLAYER_ID", "DISPLAY_FIRST_LAST": "PLAYER_NAME"}
+    )
+    cols = ["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "TEAM_ABBREVIATION"]
+    out = out.reindex(columns=cols)
+    out["PLAYER_ID"] = pd.to_numeric(out["PLAYER_ID"], errors="coerce")
+    out["TEAM_ID"] = pd.to_numeric(out["TEAM_ID"], errors="coerce")
+    out = out.dropna(subset=["PLAYER_ID", "TEAM_ID"])
+    out = out[out["TEAM_ID"] != 0]
+    out["PLAYER_ID"] = out["PLAYER_ID"].astype("int64")
+    out["TEAM_ID"] = out["TEAM_ID"].astype("int64")
+    out = out.drop_duplicates(subset=["PLAYER_ID"]).sort_values(["TEAM_ID", "PLAYER_ID"])
+    return out.reset_index(drop=True)
+
+
 def clean_shot_charts(df: pd.DataFrame, season: str) -> pd.DataFrame:
     out = df.copy()
     out["SEASON"] = season

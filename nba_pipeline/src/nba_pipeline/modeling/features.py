@@ -2,8 +2,9 @@
 
 Two feature sets are derived from curated `team_season_stats`:
 
-* `PRESEASON_FEATURES` describe a team's *previous* season and drive the
-  locked pre-season projection for the target season.
+* `PRESEASON_FEATURES` describe a team's *previous* season, plus the strength
+  of the roster it carries *into* the target season, and drive the locked
+  pre-season projection.
 * `PROFILE_FEATURES` describe a team's efficiency profile *within* a season and
   map that profile onto a full-season win percentage.
 """
@@ -13,11 +14,14 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from nba_pipeline.config import GAMES_PER_SEASON
+from nba_pipeline.config import GAMES_PER_SEASON, season_label, season_start_year
 
 # Pythagorean exponent for basketball. Daryl Morey's original fit is ~13.91;
 # 14 is the value in common use and the difference is immaterial here.
 PYTHAGOREAN_EXPONENT = 14.0
+
+# Player-minutes a team fills over a season: five on the floor for 48 minutes.
+TEAM_SEASON_MINUTES = 5 * 48 * GAMES_PER_SEASON
 
 # Efficiency and four-factor columns shared by both feature sets.
 PROFILE_FEATURES = [
@@ -33,8 +37,14 @@ PROFILE_FEATURES = [
     "PLUS_MINUS",
 ]
 
+# Describe the roster a team carries into the season, so they sit unprefixed.
+ROSTER_FEATURES = [
+    "ROSTER_PLUS_MINUS",
+    "ROSTER_PROVEN_MINUTES",
+]
+
 # The same signal measured a season earlier, plus last season's actual record
-# and roster continuity, is what we know before a season tips off.
+# and the strength of the current roster, is what we know before tip-off.
 PRESEASON_FEATURES = [
     "PRIOR_W_PCT",
     "PRIOR_NET_RATING",
@@ -46,7 +56,7 @@ PRESEASON_FEATURES = [
     "PRIOR_OREB_PCT",
     "PRIOR_FTA_RATE",
     "PRIOR_TS_PCT",
-    "PRIOR_MINUTE_WEIGHTED_PLUS_MINUS",
+    *ROSTER_FEATURES,
 ]
 
 PRIOR_PREFIX = "PRIOR_"
@@ -120,40 +130,91 @@ def minute_weighted_plus_minus(player_stats: pd.DataFrame) -> pd.DataFrame:
     return grouped[["TEAM_ID", "MINUTE_WEIGHTED_PLUS_MINUS"]]
 
 
-def roster_strength_by_season(player_stats: pd.DataFrame) -> pd.DataFrame:
-    """Minute-weighted team PLUS_MINUS for every season in `player_stats`."""
-    if player_stats.empty or "SEASON" not in player_stats.columns:
-        return pd.DataFrame(
-            columns=["SEASON", "TEAM_ID", "MINUTE_WEIGHTED_PLUS_MINUS"]
-        )
+def projected_roster_strength(
+    roster: pd.DataFrame,
+    prior_player_stats: pd.DataFrame,
+) -> pd.DataFrame:
+    """Rate a roster by what its players did last season, wherever they played.
+
+    Each rostered player brings last season's per-100 PLUS_MINUS, weighted by
+    last season's minutes as a stand-in for the role he will play now. A
+    traded star therefore lifts his new team, not his old one. Players with no
+    prior NBA minutes (rookies, returnees from abroad) carry no weight.
+
+    `ROSTER_PROVEN_MINUTES` is the share of a full season's player-minutes the
+    roster logged last year; a thin or very young roster scores low.
+    """
+    columns = ["TEAM_ID", *ROSTER_FEATURES]
+    if roster.empty:
+        return pd.DataFrame(columns=columns)
+
+    teams = pd.DataFrame(
+        {"TEAM_ID": roster["TEAM_ID"].astype("int64").drop_duplicates().to_numpy()}
+    )
+    needed = {"PLAYER_ID", "MIN", "PLUS_MINUS"}
+    if prior_player_stats.empty or not needed <= set(prior_player_stats.columns):
+        return teams.reindex(columns=columns)
+
+    prior = prior_player_stats[["PLAYER_ID", "MIN", "PLUS_MINUS"]].copy()
+    prior["PLAYER_ID"] = prior["PLAYER_ID"].astype("int64")
+    carried = roster[["PLAYER_ID", "TEAM_ID"]].merge(prior, on="PLAYER_ID", how="inner")
+
+    weighted = minute_weighted_plus_minus(carried).rename(
+        columns={"MINUTE_WEIGHTED_PLUS_MINUS": "ROSTER_PLUS_MINUS"}
+    )
+    minutes = pd.to_numeric(carried["MIN"], errors="coerce").clip(lower=0.0)
+    proven = (
+        minutes.groupby(carried["TEAM_ID"].astype("int64")).sum() / TEAM_SEASON_MINUTES
+    ).rename("ROSTER_PROVEN_MINUTES")
+
+    out = teams.merge(weighted, on="TEAM_ID", how="left").merge(
+        proven, left_on="TEAM_ID", right_index=True, how="left"
+    )
+    out["ROSTER_PROVEN_MINUTES"] = out["ROSTER_PROVEN_MINUTES"].fillna(0.0)
+    return out[columns]
+
+
+def roster_strength_by_season(
+    rosters: pd.DataFrame,
+    player_stats: pd.DataFrame,
+) -> pd.DataFrame:
+    """`projected_roster_strength` for every season in `rosters`.
+
+    Each season's roster is rated with the season before it, so the feature
+    only ever uses information available on opening night.
+    """
+    columns = ["SEASON", "TEAM_ID", *ROSTER_FEATURES]
+    if rosters.empty or "SEASON" not in rosters.columns:
+        return pd.DataFrame(columns=columns)
+    stats_by_season = (
+        dict(tuple(player_stats.groupby("SEASON")))
+        if not player_stats.empty and "SEASON" in player_stats.columns
+        else {}
+    )
     frames = []
-    for season, group in player_stats.groupby("SEASON"):
-        weighted = minute_weighted_plus_minus(group)
-        if weighted.empty:
+    for season, roster in rosters.groupby("SEASON"):
+        prior_season = season_label(season_start_year(season) - 1)
+        prior = stats_by_season.get(prior_season, pd.DataFrame())
+        strength = projected_roster_strength(roster, prior)
+        if strength.empty:
             continue
-        weighted.insert(0, "SEASON", season)
-        frames.append(weighted)
+        strength.insert(0, "SEASON", season)
+        frames.append(strength)
     if not frames:
-        return pd.DataFrame(
-            columns=["SEASON", "TEAM_ID", "MINUTE_WEIGHTED_PLUS_MINUS"]
-        )
+        return pd.DataFrame(columns=columns)
     return pd.concat(frames, ignore_index=True)
 
 
 def build_profile_frame(
     team_stats: pd.DataFrame,
-    player_stats: pd.DataFrame | None = None,
+    roster_strength: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """One row per team-season with every in-season feature attached."""
+    """One row per team-season with every in-season and roster feature attached."""
     frame = add_derived_columns(team_stats)
-    if player_stats is not None and not player_stats.empty:
-        roster = roster_strength_by_season(player_stats)
-        if not roster.empty:
-            frame["TEAM_ID"] = frame["TEAM_ID"].astype("int64")
-            frame = frame.merge(roster, on=["SEASON", "TEAM_ID"], how="left")
-    if "MINUTE_WEIGHTED_PLUS_MINUS" not in frame.columns:
-        frame["MINUTE_WEIGHTED_PLUS_MINUS"] = np.nan
-    for column in PROFILE_FEATURES:
+    if roster_strength is not None and not roster_strength.empty:
+        frame["TEAM_ID"] = frame["TEAM_ID"].astype("int64")
+        frame = frame.merge(roster_strength, on=["SEASON", "TEAM_ID"], how="left")
+    for column in [*PROFILE_FEATURES, *ROSTER_FEATURES]:
         if column not in frame.columns:
             frame[column] = np.nan
     return frame
@@ -195,15 +256,24 @@ def _pair_seasons(
         "OREB_PCT",
         "FTA_RATE",
         "TS_PCT",
-        "MINUTE_WEIGHTED_PLUS_MINUS",
     ]
     available = [c for c in source_columns if c in prior.columns]
     lagged = prior[["TEAM_ID", *available]].rename(
         columns={c: f"{PRIOR_PREFIX}{c}" for c in available}
     )
+    # Roster strength already describes the current season's roster.
     target_columns = [
         c
-        for c in ("TEAM_ID", "TEAM_NAME", "TEAM_ABBREVIATION", "GP", "W", "L", "W_PCT")
+        for c in (
+            "TEAM_ID",
+            "TEAM_NAME",
+            "TEAM_ABBREVIATION",
+            "GP",
+            "W",
+            "L",
+            "W_PCT",
+            *ROSTER_FEATURES,
+        )
         if c in current.columns
     ]
     paired = current[target_columns].merge(lagged, on="TEAM_ID", how="inner")

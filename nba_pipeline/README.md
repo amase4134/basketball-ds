@@ -126,7 +126,7 @@ actually played. Two ridge regressions, both trained on the 5 completed seasons 
 
 | Model | Learns from | Used for |
 |---|---|---|
-| **Pre-season** | Previous season's efficiency, four factors, record, and minute-weighted roster strength | A locked 82-game projection, fixed before opening night |
+| **Pre-season** | Previous season's efficiency, four factors, and record, plus the strength of the roster carried into the season | A locked 82-game projection, fixed before opening night |
 | **In-season profile** | A season's own efficiency profile against its final win total | A live projection that re-reads each team as games are played |
 
 Both are scored by leave-one-season-out cross-validation, and every projection is reconciled so the
@@ -135,6 +135,14 @@ league totals 1,230 wins — one team's win is always another's loss.
 The live projection blends the two: wins already banked are certain, and the remaining
 `82 − GP` games are projected at a rate that shifts from the pre-season prior toward the in-season
 profile as the sample grows, reaching full trust at 40 games.
+
+Roster strength follows players, not franchises. Every player on a team's current roster brings
+his previous-season per-100 plus-minus, weighted by his previous-season minutes, so a summer trade
+moves value from the old team to the new one. Two features come out of it: `ROSTER_PLUS_MINUS`
+(that weighted average) and `ROSTER_PROVEN_MINUTES` (the roster's prior-season minutes as a share
+of a full season's 19,680 player-minutes). Rookies carry no weight yet. The target season reads the
+`rosters` snapshot; completed seasons use the team each player finished with in
+`player_season_stats`, since the API cannot reconstruct past opening-night rosters.
 
 ```bash
 # Fit the models and write the locked pre-season projection
@@ -237,6 +245,7 @@ external volume is not mounted at 8:00am the script logs that and exits without 
 | `player_season_stats` | `LeagueDashPlayerStats` (Per100Possessions rates + Totals `MIN`) | `data/curated/player_season_stats/season=YYYY-YY/` | Archetype clustering; `MIN` is season total minutes |
 | `shot_charts` | `ShotChartDetail` (FGA, `team_id=0`) | `data/curated/shot_charts/season=YYYY-YY/` | `LOC_X` / `LOC_Y` shot locations |
 | `team_season_stats` | `LeagueDashTeamStats` (Base Per100 + Advanced) | `data/curated/team_season_stats/season=YYYY-YY/` | Win predictor inputs: record, ratings, four factors |
+| `rosters` | `CommonAllPlayers` (current season only) | `data/curated/rosters/season=YYYY-YY/` | Which team every rostered player belongs to now; feeds pre-season roster strength |
 | `win_predictions` | Derived by `train-wins` / `check-wins` | `data/curated/win_predictions/season=YYYY-YY/` | Current projection and error per team |
 | `win_prediction_history` | Derived by `check-wins` | `data/curated/win_prediction_history/season=YYYY-YY/` | Dated snapshots, one row per team per day |
 

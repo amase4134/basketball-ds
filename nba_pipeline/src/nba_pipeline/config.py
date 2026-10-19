@@ -109,6 +109,7 @@ class Settings:
             self.curated_dir / "teams",
             self.curated_dir / "player_season_stats",
             self.curated_dir / "team_season_stats",
+            self.curated_dir / "rosters",
             self.curated_dir / "shot_charts",
             self.curated_dir / "win_predictions",
             self.curated_dir / "win_prediction_history",
@@ -122,6 +123,7 @@ DATASETS = (
     "teams",
     "player_season_stats",
     "team_season_stats",
+    "rosters",
     "shot_charts",
 )
 

@@ -11,6 +11,7 @@ from nba_pipeline.quality import (
     check_player_season_stats,
     check_players,
     check_refresh_log,
+    check_rosters,
     check_row_count_drop,
     check_shot_charts,
     check_team_season_stats,
@@ -280,6 +281,20 @@ def warehouse(tmp_path):
 
 def test_healthy_warehouse_passes_end_to_end(warehouse):
     assert check_warehouse(cfg=warehouse, season=SEASON) == []
+
+
+def test_rosters_must_cover_every_team_once():
+    healthy = pd.DataFrame(
+        {"PLAYER_ID": range(1, 30 * 15 + 1), "TEAM_ID": [t for t in range(1, 31) for _ in range(15)]}
+    )
+    assert check_rosters(healthy, "2026-27") == []
+
+    short = healthy[healthy["TEAM_ID"] != 30]
+    assert "29 teams rostered" in messages(check_rosters(short, "2026-27"))
+
+    doubled = pd.concat([healthy, healthy.iloc[:1].assign(TEAM_ID=2)])
+    assert "two teams" in messages(check_rosters(doubled, "2026-27"))
+    assert check_rosters(pd.DataFrame(), "2026-27")
 
 
 def test_missing_season_partition_is_incomplete(warehouse):

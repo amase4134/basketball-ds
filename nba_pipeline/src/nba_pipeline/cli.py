@@ -16,6 +16,7 @@ from nba_pipeline.config import (
     warehouse_seasons,
 )
 from nba_pipeline.extract.player_stats import extract_player_season_stats
+from nba_pipeline.extract.rosters import extract_rosters
 from nba_pipeline.extract.shot_charts import extract_shot_charts
 from nba_pipeline.extract.static import extract_players, extract_teams
 from nba_pipeline.extract.team_stats import extract_team_season_stats
@@ -119,6 +120,8 @@ def refresh(
         extract_player_season_stats(seasons, cfg=cfg, force=force, dry_run=dry_run)
     if "team_season_stats" in datasets:
         extract_team_season_stats(seasons, cfg=cfg, force=force, dry_run=dry_run)
+    if "rosters" in datasets:
+        extract_rosters(seasons, cfg=cfg, dry_run=dry_run)
     if "shot_charts" in datasets:
         extract_shot_charts(
             seasons,

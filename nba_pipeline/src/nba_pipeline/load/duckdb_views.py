@@ -21,6 +21,7 @@ def connect(cfg: Settings | None = None, database: str = ":memory:") -> duckdb.D
 PARTITIONED_DATASETS = (
     "player_season_stats",
     "team_season_stats",
+    "rosters",
     "shot_charts",
     "win_predictions",
     "win_prediction_history",

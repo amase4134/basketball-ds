@@ -4,8 +4,9 @@ Trained on the five completed seasons before the target season. Two ridge
 regressions do the work:
 
 * The **pre-season** model learns how a season's record follows from the
-  previous season's efficiency profile, and is applied once to produce a locked
-  82-game projection for every team.
+  previous season's efficiency profile and the strength of the roster carried
+  into the season, and is applied once to produce a locked 82-game projection
+  for every team.
 * The **profile** model learns how an in-season efficiency profile maps onto a
   full-season win percentage, and is re-applied as the target season unfolds.
 
@@ -33,6 +34,7 @@ from nba_pipeline.config import (
     training_seasons_for,
 )
 from nba_pipeline.extract.player_stats import load_curated_player_stats
+from nba_pipeline.extract.rosters import load_season_roster
 from nba_pipeline.extract.team_stats import load_curated_team_stats_many
 from nba_pipeline.modeling.features import (
     PRESEASON_FEATURES,
@@ -40,6 +42,7 @@ from nba_pipeline.modeling.features import (
     build_profile_frame,
     build_transition_frame,
     feature_matrix,
+    roster_strength_by_season,
 )
 
 logger = logging.getLogger(__name__)
@@ -191,10 +194,9 @@ def load_training_frames(
     """Curated team profiles for the training seasons, and the target season."""
     cfg = cfg or settings
     train_seasons = training_seasons_for(target_season, n)
+    seasons = [*train_seasons, target_season]
 
-    team_stats = load_curated_team_stats_many(
-        [*train_seasons, target_season], cfg=cfg
-    )
+    team_stats = load_curated_team_stats_many(seasons, cfg=cfg)
     if team_stats.empty:
         raise FileNotFoundError(
             "No curated team_season_stats found; run `refresh --dataset "
@@ -202,16 +204,26 @@ def load_training_frames(
         )
 
     player_frames = []
-    for season in [*train_seasons, target_season]:
+    for season in seasons:
         try:
             player_frames.append(load_curated_player_stats(season, cfg=cfg))
         except FileNotFoundError:
-            logger.info("player_season_stats missing for %s; skipping roster feature", season)
+            logger.info("player_season_stats missing for %s", season)
     player_stats = (
         pd.concat(player_frames, ignore_index=True) if player_frames else pd.DataFrame()
     )
 
-    profiles = build_profile_frame(team_stats, player_stats)
+    roster_frames = [load_season_roster(season, cfg=cfg) for season in seasons]
+    if roster_frames[-1].empty:
+        logger.warning(
+            "No roster for %s; run `refresh --dataset rosters`. The pre-season "
+            "projection will treat every roster as league average.",
+            target_season,
+        )
+    rosters = pd.concat([r for r in roster_frames if not r.empty] or [pd.DataFrame()])
+    roster_strength = roster_strength_by_season(rosters, player_stats)
+
+    profiles = build_profile_frame(team_stats, roster_strength)
     training = profiles[profiles["SEASON"].isin(train_seasons)].copy()
     target = profiles[profiles["SEASON"] == target_season].copy()
     return training, target

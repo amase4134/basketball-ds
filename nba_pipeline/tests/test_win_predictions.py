@@ -15,16 +15,20 @@ from nba_pipeline.config import (
     training_seasons_for,
     warehouse_seasons,
 )
+from nba_pipeline.extract.rosters import load_season_roster
 from nba_pipeline.extract.team_stats import preseason_skeleton
 from nba_pipeline.load.parquet import replace_season_partition, write_static_table
 from nba_pipeline.modeling import team_wins, tracking
 from nba_pipeline.modeling.features import (
+    TEAM_SEASON_MINUTES,
     build_profile_frame,
     build_transition_frame,
     minute_weighted_plus_minus,
+    projected_roster_strength,
     pythagorean_win_pct,
     roster_strength_by_season,
 )
+from nba_pipeline.transform.clean import clean_rosters
 from nba_pipeline.reporting import email_sender, weekly_win_report
 
 TARGET = "2026-27"
@@ -108,15 +112,101 @@ def test_minute_weighted_plus_minus_ignores_unplayed_rows():
     assert minute_weighted_plus_minus(pd.DataFrame()).empty
 
 
-def test_roster_strength_keeps_the_season_key():
+def test_roster_strength_follows_a_player_to_his_new_team():
+    last_season = pd.DataFrame(
+        {
+            "PLAYER_ID": [1, 2, 3],
+            "TEAM_ID": [10, 10, 20],
+            "MIN": [2500.0, 1500.0, 2000.0],
+            "PLUS_MINUS": [12.0, -2.0, -4.0],
+        }
+    )
+    # Player 1 moved from team 10 to team 20 over the summer; 4 is a rookie.
+    roster = pd.DataFrame({"PLAYER_ID": [1, 2, 3, 4], "TEAM_ID": [20, 10, 20, 10]})
+    result = projected_roster_strength(roster, last_season).set_index("TEAM_ID")
+
+    assert result.loc[20, "ROSTER_PLUS_MINUS"] == pytest.approx(
+        (2500 * 12 + 2000 * -4) / 4500
+    )
+    # The rookie has no NBA minutes, so team 10 is rated on player 2 alone.
+    assert result.loc[10, "ROSTER_PLUS_MINUS"] == pytest.approx(-2.0)
+    assert result.loc[20, "ROSTER_PROVEN_MINUTES"] == pytest.approx(
+        4500 / TEAM_SEASON_MINUTES
+    )
+    assert result.loc[10, "ROSTER_PROVEN_MINUTES"] == pytest.approx(
+        1500 / TEAM_SEASON_MINUTES
+    )
+
+
+def test_a_roster_of_newcomers_has_no_proven_minutes():
+    last_season = pd.DataFrame(
+        {"PLAYER_ID": [1], "TEAM_ID": [10], "MIN": [2000.0], "PLUS_MINUS": [3.0]}
+    )
+    roster = pd.DataFrame({"PLAYER_ID": [1, 7, 8], "TEAM_ID": [10, 30, 30]})
+    result = projected_roster_strength(roster, last_season).set_index("TEAM_ID")
+    assert np.isnan(result.loc[30, "ROSTER_PLUS_MINUS"])
+    assert result.loc[30, "ROSTER_PROVEN_MINUTES"] == 0.0
+
+    # Without any prior season the roster is unknown, not empty.
+    unknown = projected_roster_strength(roster, pd.DataFrame())
+    assert unknown[["ROSTER_PLUS_MINUS", "ROSTER_PROVEN_MINUTES"]].isna().all().all()
+    assert projected_roster_strength(pd.DataFrame(), pd.DataFrame()).empty
+
+
+def test_roster_strength_rates_each_season_with_the_one_before():
     players = pd.concat(
         [player_frame(season, offset=i) for i, season in enumerate(TRAINING)],
         ignore_index=True,
     )
-    roster = roster_strength_by_season(players)
-    assert set(roster.columns) == {"SEASON", "TEAM_ID", "MINUTE_WEIGHTED_PLUS_MINUS"}
-    assert sorted(roster["SEASON"].unique()) == TRAINING
-    assert roster["MINUTE_WEIGHTED_PLUS_MINUS"].notna().all()
+    rosters = players[["SEASON", "PLAYER_ID", "TEAM_ID"]]
+    strength = roster_strength_by_season(rosters, players)
+
+    assert set(strength.columns) == {
+        "SEASON",
+        "TEAM_ID",
+        "ROSTER_PLUS_MINUS",
+        "ROSTER_PROVEN_MINUTES",
+    }
+    assert sorted(strength["SEASON"].unique()) == TRAINING
+    # The earliest season has no prior season on disk, which is unknown rather
+    # than a roster of rookies, so both features stay missing.
+    first = strength[strength["SEASON"] == TRAINING[0]]
+    assert first[["ROSTER_PLUS_MINUS", "ROSTER_PROVEN_MINUTES"]].isna().all().all()
+
+    # 2022-23 must be rated with 2021-22 numbers, never its own.
+    second = strength[strength["SEASON"] == TRAINING[1]].set_index("TEAM_ID")
+    expected = minute_weighted_plus_minus(
+        players[players["SEASON"] == TRAINING[0]]
+    ).set_index("TEAM_ID")
+    assert second.loc[5, "ROSTER_PLUS_MINUS"] == pytest.approx(
+        expected.loc[5, "MINUTE_WEIGHTED_PLUS_MINUS"]
+    )
+
+
+def test_clean_rosters_drops_free_agents_and_duplicates():
+    raw = pd.DataFrame(
+        {
+            "PERSON_ID": [1, 2, 2, 3],
+            "DISPLAY_FIRST_LAST": ["A", "B", "B", "C"],
+            "TEAM_ID": [10, 20, 20, 0],
+            "TEAM_ABBREVIATION": ["AAA", "BBB", "BBB", ""],
+            "ROSTERSTATUS": [1, 1, 1, 0],
+        }
+    )
+    cleaned = clean_rosters(raw)
+    assert list(cleaned.columns) == ["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "TEAM_ABBREVIATION"]
+    assert cleaned["PLAYER_ID"].tolist() == [1, 2]
+
+
+def test_season_roster_prefers_a_snapshot_over_player_stats(preseason):
+    # The fixture snapshots the target season and leaves past seasons to stats.
+    target = load_season_roster(TARGET, cfg=preseason)
+    assert len(target) == TEAMS * 8
+    assert (target["SEASON"] == TARGET).all()
+
+    past = load_season_roster(TRAINING[-1], cfg=preseason)
+    assert len(past) == TEAMS * 8
+    assert load_season_roster("1999-00", cfg=preseason).empty
 
 
 def test_transition_frame_pairs_consecutive_seasons_only():
@@ -254,6 +344,9 @@ def build_warehouse(
         replace_season_partition(
             skeleton, cfg.curated_dir / "team_season_stats", TARGET
         )
+    # Opening-night rosters: every player stays where he finished last season.
+    roster = player_frame(TARGET)[["PLAYER_ID", "PLAYER_NAME", "TEAM_ID"]]
+    replace_season_partition(roster, cfg.curated_dir / "rosters", TARGET)
     return cfg
 
 
@@ -361,6 +454,25 @@ def test_preseason_prediction_has_no_in_season_information(preseason):
     )
     assert (predictions["inseason_talent_wins_82"] == GAMES_PER_SEASON / 2).all()
     assert predictions["preseason_rank"].nunique() == TEAMS
+
+
+def test_an_offseason_trade_moves_the_preseason_projection(preseason):
+    model, training, target = team_wins.train(TARGET, cfg=preseason)
+    before = team_wins.predict(model, training, target).set_index("TEAM_ID")
+
+    # Team 30's two best players are traded to team 1 over the summer.
+    roster = pd.read_parquet(
+        preseason.curated_dir / "rosters" / f"season={TARGET}" / "data.parquet"
+    )
+    roster.loc[roster["PLAYER_ID"].isin([3000, 3001]), "TEAM_ID"] = 1
+    replace_season_partition(roster, preseason.curated_dir / "rosters", TARGET)
+
+    model, training, target = team_wins.train(TARGET, cfg=preseason)
+    after = team_wins.predict(model, training, target).set_index("TEAM_ID")
+
+    assert model.preseason_metrics.coefficients["ROSTER_PLUS_MINUS"] > 0
+    assert after.loc[1, "preseason_pred_wins"] > before.loc[1, "preseason_pred_wins"]
+    assert after.loc[30, "preseason_pred_wins"] < before.loc[30, "preseason_pred_wins"]
 
 
 def test_preseason_summary_reports_no_accuracy_yet(preseason):

@@ -28,6 +28,7 @@ MIN_ROWS: dict[str, int] = {
     "teams": 30,
     "player_season_stats": 1,
     "team_season_stats": 30,
+    "rosters": 30 * 13,
     "shot_charts": 1,
 }
 
@@ -232,6 +233,18 @@ def check_team_season_stats(df: pd.DataFrame, season: str) -> list[Finding]:
     return findings
 
 
+def check_rosters(df: pd.DataFrame, season: str) -> list[Finding]:
+    if df.empty:
+        return [Finding("rosters", season, "partition is empty")]
+    findings = _check_min_rows("rosters", season, len(df))
+    if df["PLAYER_ID"].duplicated().any():
+        findings.append(Finding("rosters", season, "players listed on two teams"))
+    teams = df["TEAM_ID"].nunique()
+    if teams != 30:
+        findings.append(Finding("rosters", season, f"{teams} teams rostered, expected 30"))
+    return findings
+
+
 def check_shot_charts(df: pd.DataFrame, season: str) -> list[Finding]:
     if df.empty:
         return [Finding("shot_charts", season, "partition is empty")]
@@ -303,6 +316,14 @@ def check_warehouse(
         )
     else:
         findings += check_team_season_stats(team_stats, season)
+
+    # Rosters can only be snapshotted for the season underway.
+    if season == cfg.target_season:
+        rosters = _read_parquet_dir(cfg.curated_dir / "rosters" / f"season={season}")
+        if rosters is None:
+            findings.append(Finding("rosters", season, "no curated partition for this season"))
+        else:
+            findings += check_rosters(rosters, season)
 
     shots = _read_parquet_dir(cfg.curated_dir / "shot_charts" / f"season={season}")
     if shots is None:
