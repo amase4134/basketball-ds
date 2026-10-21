@@ -169,6 +169,26 @@ Before opening night the NBA API returns no rows for the season at all, so the p
 30-team partition at zero games and the tracker reports the locked projection with accuracy
 pending.
 
+### Compare against Opta
+
+```bash
+python -m nba_pipeline compare-opta              # scrape the Opta Analyst article, then compare
+python -m nba_pipeline compare-opta --offline    # re-parse the last saved copy
+python -m nba_pipeline compare-opta --url <article>  # a different season's article
+```
+
+Scrapes Opta Analyst's [pre-season predictions article](https://theanalyst.com/articles/2026-27-nba-predictions-win-totals-finals-chances)
+(projected wins, playoff percentage, and preseason TRACR rank for all 30 teams) and lines it up
+against the locked pre-season projection from `train-wins`. It prints an East/West side-by-side
+table and writes `data/meta/reports/opta_comparison_<season>_<date>.html` (summary cards, a
+dumbbell chart of every team, the biggest disagreements, and per-conference tables) plus a
+matching CSV. Agreement is measured as the average gap in wins, Spearman rank correlation,
+spread, top-6 and top-10 overlap per conference, and how many teams land in the same tier.
+Once games are played it also reports which forecast sits closer to each team's 82-game pace.
+
+The scraper fails loudly if it does not find exactly 30 teams, so a redesigned page cannot
+silently produce a partial comparison.
+
 ## Weekly email report
 
 A digest of how the predictor is doing, mailed every **Friday at 8:30am**:
@@ -247,6 +267,7 @@ external volume is not mounted at 8:00am the script logs that and exits without 
 | `team_season_stats` | `LeagueDashTeamStats` (Base Per100 + Advanced) | `data/curated/team_season_stats/season=YYYY-YY/` | Win predictor inputs: record, ratings, four factors |
 | `rosters` | `CommonAllPlayers` (current season only) | `data/curated/rosters/season=YYYY-YY/` | Which team every rostered player belongs to now; feeds pre-season roster strength |
 | `win_predictions` | Derived by `train-wins` / `check-wins` | `data/curated/win_predictions/season=YYYY-YY/` | Current projection and error per team |
+| `opta_projections` | Scraped by `compare-opta` from Opta Analyst | `data/curated/opta_projections/season=YYYY-YY/` | Opta projected wins, playoff %, TRACR rank, conference seed; raw HTML under `data/raw/opta_projections/` |
 | `win_prediction_history` | Derived by `check-wins` | `data/curated/win_prediction_history/season=YYYY-YY/` | Dated snapshots, one row per team per day |
 
 Raw API dumps land under `data/raw/`. Refresh outcomes append to `data/meta/refresh_log.parquet`,

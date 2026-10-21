@@ -15,15 +15,16 @@ from nba_pipeline.config import (
     settings,
     warehouse_seasons,
 )
+from nba_pipeline.extract import opta_projections
 from nba_pipeline.extract.player_stats import extract_player_season_stats
 from nba_pipeline.extract.rosters import extract_rosters
 from nba_pipeline.extract.shot_charts import extract_shot_charts
 from nba_pipeline.extract.static import extract_players, extract_teams
 from nba_pipeline.extract.team_stats import extract_team_season_stats
-from nba_pipeline.modeling import team_wins, tracking
+from nba_pipeline.modeling import opta_comparison, team_wins, tracking
 from nba_pipeline.modeling.team_wins import TrainedWinModel
 from nba_pipeline.quality import check_warehouse, parse_since
-from nba_pipeline.reporting import email_sender, weekly_win_report
+from nba_pipeline.reporting import email_sender, opta_comparison_report, weekly_win_report
 
 app = typer.Typer(
     name="nba-pipeline",
@@ -437,6 +438,67 @@ def send_win_report(
     typer.echo(report.subject)
     typer.echo(f"Report archived to {archived}")
     typer.echo(outcome)
+
+
+@app.command("compare-opta")
+def compare_opta(
+    season: Optional[str] = typer.Option(
+        None,
+        "--season",
+        help="Season to compare. Default: current season.",
+    ),
+    url: str = typer.Option(
+        opta_projections.OPTA_URL,
+        "--url",
+        help="Opta Analyst predictions article to scrape.",
+    ),
+    offline: bool = typer.Option(
+        False,
+        "--offline",
+        help="Re-parse the last saved copy of the article instead of fetching it.",
+    ),
+) -> None:
+    """Scrape Opta's pre-season win projections and compare them with ours."""
+    base = Settings()
+    target = season or base.target_season
+    cfg = Settings(target_season=target)
+    cfg.ensure_dirs()
+
+    try:
+        predictions = tracking.load_predictions(target, cfg=cfg)
+        opta = opta_projections.extract_opta_projections(
+            target, cfg=cfg, url=url, offline=offline
+        )
+        comparison = opta_comparison.build_comparison(predictions, opta)
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    summary = opta_comparison.summarise(comparison)
+    report = opta_comparison_report.build(
+        comparison, summary, season=target, pulled_from=opta["pulled_from"].iloc[0]
+    )
+    html_path, csv_path = report.archive(cfg)
+
+    typer.echo(
+        f"{target} pre-season projections, my model vs Opta "
+        f"(avg gap {summary['mean_abs_gap']:.1f} wins, "
+        f"rank rho {summary['spearman_rho']:.2f}, "
+        f"spread {summary['my_spread']:.1f} vs {summary['opta_spread']:.1f})"
+    )
+    for conference, group in comparison.groupby("conference"):
+        typer.echo(
+            f"\n{conference:<5} {'TEAM':<5} {'MINE':>6} {'OPTA':>6} {'GAP':>6} "
+            f"{'MY#':>4} {'OPTA#':>6} {'PLAYOFF%':>9}"
+        )
+        for _, row in group.sort_values("opta_conf_rank").iterrows():
+            typer.echo(
+                f"{'':<5} {row['TEAM_ABBREVIATION']:<5} {row['my_proj_wins']:>6.1f} "
+                f"{row['opta_proj_wins']:>6.1f} {row['win_diff']:>+6.1f} "
+                f"{row['my_conf_rank']:>4} {row['opta_conf_rank']:>6} "
+                f"{row['opta_playoff_pct'] * 100:>8.1f}%"
+            )
+    typer.echo(f"\nWrote {html_path}")
+    typer.echo(f"Wrote {csv_path}")
 
 
 @app.command("list-seasons")
