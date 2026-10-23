@@ -36,10 +36,20 @@ def test_shot_summary_math_and_safe_map():
 
 def test_column_ranges_filter_and_validate():
     season = newest_season()
-    filtered = client.get('/api/v1/players', params={'season': season, 'min_stat': ['MIN:500'], 'max_stat': ['MIN:1500']})
+    # Derive the band from the data: the newest season may be only days old, so
+    # any fixed minute range risks excluding every player and testing nothing.
+    everyone = client.get('/api/v1/players', params={'season': season, 'page_size': 100, 'sort': 'MIN'}).json()
+    minutes = sorted(row['MIN'] for row in everyone['items'] if row['MIN'] is not None)
+    assert minutes, f'no players with minutes recorded for {season}'
+    low, high = minutes[len(minutes) // 4], minutes[3 * len(minutes) // 4]
+
+    filtered = client.get(
+        '/api/v1/players',
+        params={'season': season, 'min_stat': [f'MIN:{low}'], 'max_stat': [f'MIN:{high}']},
+    )
     assert filtered.status_code == 200
     assert filtered.json()['items'], 'expected at least one row inside the requested minute band'
-    assert all(500 <= row['MIN'] <= 1500 for row in filtered.json()['items'])
+    assert all(low <= row['MIN'] <= high for row in filtered.json()['items'])
     unfiltered_total = client.get('/api/v1/players', params={'season': season}).json()['meta']['total']
     assert filtered.json()['meta']['total'] < unfiltered_total
 

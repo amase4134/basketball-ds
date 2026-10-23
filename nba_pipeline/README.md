@@ -215,19 +215,51 @@ Verification) at <https://myaccount.google.com/apppasswords>, then paste it into
 back to macOS `Mail.app` using the account already signed in on this Mac, so delivery works before
 any secret is configured.
 
-Install the Friday LaunchAgent:
+## Scheduled jobs
+
+One script installs both LaunchAgents — the 8:00am daily refresh and the 8:30am Friday report:
 
 ```bash
-cp scripts/com.basketballds.nba-weekly-report.plist ~/Library/LaunchAgents/
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.basketballds.nba-weekly-report.plist
+./scripts/install_launch_agents.sh      # re-run after editing either script
+```
 
+```bash
 # Status, manual run, logs
 launchctl print "gui/$(id -u)/com.basketballds.nba-weekly-report"
 launchctl kickstart -p "gui/$(id -u)/com.basketballds.nba-weekly-report"
-tail -f logs/weekly_report.log
+tail -f ~/Library/Logs/basketball-ds/weekly_report.log
 
-# Stop it (re-bootstrap to turn it back on)
+# Stop one (re-run the installer to turn it back on)
 launchctl bootout "gui/$(id -u)/com.basketballds.nba-weekly-report"
+```
+
+### Why the installer exists
+
+macOS denies scheduled jobs read and write access to external volumes
+(`kTCCServiceSystemPolicyRemovableVolumes`). Because this warehouse lives on one, a LaunchAgent
+pointed straight at a script in `scripts/` dies with **exit 78 (`EX_CONFIG`)** before running a
+single line: launchd cannot even create its own log files on the volume, so there is nothing in
+`logs/` to explain the silence. A job whose program sits on the volume fails the same way with
+exit 126, `Operation not permitted`.
+
+The installer sidesteps this entirely rather than asking for a broad permission grant. It copies
+each script to `~/Library/Application Support/basketball-ds/` and points the agents there, with
+logs in `~/Library/Logs/basketball-ds/`. The scripts then invoke `.venv/bin/python` directly
+instead of sourcing `activate`, since bash cannot read anything on the volume while Python is
+permitted to. Nothing but Python ever touches the warehouse.
+
+If you would rather keep the agents pointed at the volume, grant Full Disk Access to `/bin/bash`
+in System Settings → Privacy & Security instead. That works, but it lets *every* shell script on
+the Mac read your whole disk, which is why the installer is the default.
+
+Diagnosing a silent job:
+
+```bash
+# Nonzero "last exit code" with no log file at all means launchd never started it
+launchctl print "gui/$(id -u)/com.basketballds.nba-weekly-report" | grep -E "runs|last exit"
+
+# Confirm the trigger actually fired
+/usr/bin/log show --last 24h --predicate 'eventMessage CONTAINS "nba-weekly-report"' --style compact
 ```
 
 ## Daily automation
@@ -235,26 +267,27 @@ launchctl bootout "gui/$(id -u)/com.basketballds.nba-weekly-report"
 [`scripts/daily_refresh.sh`](scripts/daily_refresh.sh) runs `refresh --force` for the
 current season, then `check --since` the run's start time. The check runs even when the
 refresh fails, and the script exits non-zero if either step did. A lock directory stops
-a second run from starting while a long shot-chart pull is still going. Output lands in
-the gitignored `logs/` directory.
+a second run from starting while a long shot-chart pull is still going. It finishes by
+recording a win-predictor accuracy snapshot. Output lands in
+`~/Library/Logs/basketball-ds/daily_refresh.log`.
 
-A user LaunchAgent runs it at 8:00am local, every day:
+Install it alongside the weekly report with `./scripts/install_launch_agents.sh`, then:
 
 ```bash
-cp scripts/com.basketballds.nba-refresh.plist ~/Library/LaunchAgents/
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.basketballds.nba-refresh.plist
-
 # Status, manual run, logs
 launchctl print "gui/$(id -u)/com.basketballds.nba-refresh"
 launchctl kickstart -p "gui/$(id -u)/com.basketballds.nba-refresh"
-tail -f logs/daily_refresh.log
-
-# Stop it (re-bootstrap to turn it back on)
-launchctl bootout "gui/$(id -u)/com.basketballds.nba-refresh"
+tail -f ~/Library/Logs/basketball-ds/daily_refresh.log
 ```
 
-The plist hard-codes the absolute project path, so edit it if the repo moves. If the
-external volume is not mounted at 8:00am the script logs that and exits without running.
+The scripts hard-code the absolute project path, so edit them and re-run the installer if
+the repo moves. If the external volume is not mounted at 8:00am the script logs that and
+exits without running.
+
+Shot charts only cover players past the 500-minute filter, so for the first weeks of a season
+no player qualifies and the pull is logged as `skipped` rather than failed. The daily check
+treats that as healthy and only expects a shot-chart partition once someone clears the
+threshold, so a brand-new season does not fail the job every morning until midseason.
 
 ## Dataset dictionary
 

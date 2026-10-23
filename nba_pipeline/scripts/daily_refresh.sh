@@ -5,7 +5,13 @@
 set -u
 
 PROJECT_ROOT="/Volumes/Data-700GB/Basketball DS/nba_pipeline"
-LOG_DIR="${PROJECT_ROOT}/logs"
+PYTHON="${PROJECT_ROOT}/.venv/bin/python"
+
+# macOS denies scheduled jobs read and write access to external volumes
+# (kTCCServiceSystemPolicyRemovableVolumes), so the shell's own logs and lock
+# must live on the internal disk even though the warehouse does not. Python
+# reaches the warehouse fine; bash cannot read a single byte of it.
+LOG_DIR="${HOME}/Library/Logs/basketball-ds"
 LOCK_DIR="${LOG_DIR}/daily_refresh.lock"
 
 log() {
@@ -30,18 +36,16 @@ trap 'rmdir "${LOCK_DIR}" 2>/dev/null' EXIT
 
 cd "${PROJECT_ROOT}" || exit 1
 
-if [ ! -f ".venv/bin/activate" ]; then
-    log "missing virtualenv at ${PROJECT_ROOT}/.venv"
+if [ ! -x "${PYTHON}" ]; then
+    log "missing virtualenv interpreter at ${PYTHON}"
     exit 1
 fi
-# shellcheck disable=SC1091
-source .venv/bin/activate
 
-STARTED_AT="$(python -c 'from datetime import datetime, timezone; print(datetime.now(timezone.utc).isoformat())')"
+STARTED_AT="$("${PYTHON}" -c 'from datetime import datetime, timezone; print(datetime.now(timezone.utc).isoformat())')"
 log "=== refresh started (${STARTED_AT}) ==="
 
 refresh_status=0
-python -m nba_pipeline refresh --force || refresh_status=$?
+"${PYTHON}" -m nba_pipeline refresh --force || refresh_status=$?
 if [ "${refresh_status}" -eq 0 ]; then
     log "refresh finished"
 else
@@ -50,7 +54,7 @@ fi
 
 # Run the check either way: a partial refresh still needs to be reported on.
 check_status=0
-python -m nba_pipeline check --since "${STARTED_AT}" || check_status=$?
+"${PYTHON}" -m nba_pipeline check --since "${STARTED_AT}" || check_status=$?
 if [ "${check_status}" -eq 0 ]; then
     log "data check passed"
 else
@@ -60,7 +64,7 @@ fi
 # Score the win predictor against the games played so far. The refresh above
 # already pulled today's team stats, so this reads curated Parquet only.
 wins_status=0
-python -m nba_pipeline check-wins --offline || wins_status=$?
+"${PYTHON}" -m nba_pipeline check-wins --offline || wins_status=$?
 if [ "${wins_status}" -eq 0 ]; then
     log "win predictor snapshot recorded"
 else

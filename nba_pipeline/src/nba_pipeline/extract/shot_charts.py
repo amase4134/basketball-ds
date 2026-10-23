@@ -96,12 +96,33 @@ def extract_shot_charts(
                 logger.info("  progress %s/%s players for %s", i, len(player_ids), season)
 
         if not frames:
+            # Early in a season nobody has logged enough minutes to qualify, so
+            # there is genuinely nothing to pull. That is the schedule working
+            # as expected, not a broken refresh, and must not be reported as a
+            # failure every morning until the threshold is finally crossed.
+            if not player_ids:
+                append_refresh_log(
+                    dataset="shot_charts",
+                    season=season,
+                    row_count=0,
+                    status="skipped",
+                    message=f"no players with {min_minutes}+ minutes yet",
+                    cfg=cfg,
+                )
+                counts[season] = 0
+                logger.info(
+                    "No shot charts for %s yet: no player has reached %s minutes",
+                    season,
+                    min_minutes,
+                )
+                continue
+
             append_refresh_log(
                 dataset="shot_charts",
                 season=season,
                 row_count=0,
                 status="error",
-                message=f"no shot rows; errors={errors}",
+                message=f"no shot rows for {len(player_ids)} players; errors={errors}",
                 cfg=cfg,
             )
             counts[season] = 0

@@ -6,7 +6,13 @@
 set -u
 
 PROJECT_ROOT="/Volumes/Data-700GB/Basketball DS/nba_pipeline"
-LOG_DIR="${PROJECT_ROOT}/logs"
+PYTHON="${PROJECT_ROOT}/.venv/bin/python"
+
+# macOS denies scheduled jobs read and write access to external volumes
+# (kTCCServiceSystemPolicyRemovableVolumes), so the shell's own logs and lock
+# must live on the internal disk even though the warehouse does not. Python
+# reaches the warehouse fine; bash cannot read a single byte of it.
+LOG_DIR="${HOME}/Library/Logs/basketball-ds"
 LOCK_DIR="${LOG_DIR}/weekly_report.lock"
 
 log() {
@@ -30,18 +36,16 @@ trap 'rmdir "${LOCK_DIR}" 2>/dev/null' EXIT
 
 cd "${PROJECT_ROOT}" || exit 1
 
-if [ ! -f ".venv/bin/activate" ]; then
-    log "missing virtualenv at ${PROJECT_ROOT}/.venv"
+if [ ! -x "${PYTHON}" ]; then
+    log "missing virtualenv interpreter at ${PYTHON}"
     exit 1
 fi
-# shellcheck disable=SC1091
-source .venv/bin/activate
 
 log "=== weekly win report started ==="
 
 # The daily refresh already pulled today's team stats, so score offline.
 score_status=0
-python -m nba_pipeline check-wins --offline || score_status=$?
+"${PYTHON}" -m nba_pipeline check-wins --offline || score_status=$?
 if [ "${score_status}" -eq 0 ]; then
     log "scored the win predictor against results to date"
 else
@@ -49,7 +53,7 @@ else
 fi
 
 send_status=0
-python -m nba_pipeline send-win-report || send_status=$?
+"${PYTHON}" -m nba_pipeline send-win-report || send_status=$?
 if [ "${send_status}" -eq 0 ]; then
     log "weekly report sent"
 else

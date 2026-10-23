@@ -1,5 +1,6 @@
 """Checker tests over synthetic frames; nothing here touches stats.nba.com."""
 
+import shutil
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
@@ -8,6 +9,7 @@ import pytest
 from nba_pipeline.config import Settings
 from nba_pipeline.load.parquet import append_refresh_log, replace_season_partition, write_static_table
 from nba_pipeline.quality import (
+    shot_charts_due,
     check_player_season_stats,
     check_players,
     check_refresh_log,
@@ -311,3 +313,54 @@ def test_warehouse_requires_a_refresh_newer_than_the_cutoff(warehouse):
     findings = check_warehouse(cfg=warehouse, season=SEASON, since=cutoff)
     assert len(findings) == 5
     assert all("no successful refresh since" in f.message for f in findings)
+
+
+def test_shot_charts_are_only_due_once_someone_clears_the_minutes_filter(warehouse):
+    barely_started = stats_frame().assign(MIN=40.0)
+    assert not shot_charts_due(barely_started, warehouse)
+    assert shot_charts_due(stats_frame(), warehouse)
+    # One qualifying player is enough to expect a partition.
+    one_regular = stats_frame().assign(MIN=40.0)
+    one_regular.loc[one_regular.index[0], "MIN"] = float(warehouse.min_minutes)
+    assert shot_charts_due(one_regular, warehouse)
+    assert not shot_charts_due(pd.DataFrame(), warehouse)
+
+
+def test_a_days_old_season_without_shot_charts_is_still_healthy(warehouse):
+    """The first weeks of a season have no qualifying players, and that is fine.
+
+    Flagging it would fail the daily job every morning until midseason and bury
+    any real problem in noise.
+    """
+    shutil.rmtree(warehouse.curated_dir / "shot_charts" / f"season={SEASON}")
+    replace_season_partition(
+        stats_frame().assign(MIN=40.0), warehouse.curated_dir / "player_season_stats", SEASON
+    )
+    append_refresh_log(
+        dataset="shot_charts",
+        season=SEASON,
+        row_count=0,
+        status="skipped",
+        message="no players with 500+ minutes yet",
+        cfg=warehouse,
+    )
+    assert check_warehouse(cfg=warehouse, season=SEASON) == []
+
+    # Once players clear the filter, the absent partition is a real gap again.
+    replace_season_partition(
+        stats_frame(), warehouse.curated_dir / "player_season_stats", SEASON
+    )
+    assert "no curated partition" in messages(check_warehouse(cfg=warehouse, season=SEASON))
+
+
+def test_a_failed_shot_pull_is_still_reported(warehouse):
+    """A deliberate skip is tolerated; an outright failure must not be."""
+    append_refresh_log(
+        dataset="shot_charts",
+        season=SEASON,
+        row_count=0,
+        status="error",
+        message="no shot rows for 240 players; errors=240",
+        cfg=warehouse,
+    )
+    assert "last refresh status 'error'" in messages(check_warehouse(cfg=warehouse, season=SEASON))

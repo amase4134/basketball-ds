@@ -36,6 +36,10 @@ MIN_ROWS: dict[str, int] = {
 # only a much larger share means the coordinates themselves are junk.
 OUT_OF_BOUNDS_TOLERANCE = 0.01
 
+# A refresh that deliberately pulled nothing is as settled as one that pulled
+# rows; only an outright failure leaves the partition in an unknown state.
+SETTLED_STATUSES = frozenset({"ok", "skipped"})
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -98,7 +102,7 @@ def check_refresh_log(
 
     findings: list[Finding] = []
     latest = rows.iloc[-1]
-    if latest["status"] != "ok":
+    if latest["status"] not in SETTLED_STATUSES:
         detail = str(latest.get("message") or "").strip()
         suffix = f": {detail}" if detail else ""
         findings.append(
@@ -106,7 +110,7 @@ def check_refresh_log(
         )
 
     if since is not None:
-        succeeded = rows[rows["status"] == "ok"]
+        succeeded = rows[rows["status"].isin(SETTLED_STATUSES)]
         timestamps = pd.to_datetime(succeeded["timestamp"], utc=True, errors="coerce")
         if not (timestamps >= pd.Timestamp(since)).any():
             findings.append(
@@ -245,6 +249,18 @@ def check_rosters(df: pd.DataFrame, season: str) -> list[Finding]:
     return findings
 
 
+def shot_charts_due(player_stats: pd.DataFrame, cfg: Settings) -> bool:
+    """Whether anyone has played enough minutes to qualify for a shot pull.
+
+    Shot charts are only pulled for players past the minutes filter, so for the
+    first few weeks of a season there is nothing to pull and a missing
+    partition is correct rather than a gap in the data.
+    """
+    if player_stats.empty or "MIN" not in player_stats.columns:
+        return False
+    return bool((player_stats["MIN"] >= cfg.min_minutes).any())
+
+
 def check_shot_charts(df: pd.DataFrame, season: str) -> list[Finding]:
     if df.empty:
         return [Finding("shot_charts", season, "partition is empty")]
@@ -326,12 +342,12 @@ def check_warehouse(
             findings += check_rosters(rosters, season)
 
     shots = _read_parquet_dir(cfg.curated_dir / "shot_charts" / f"season={season}")
-    if shots is None:
+    if shots is not None:
+        findings += check_shot_charts(shots, season)
+    elif stats is not None and shot_charts_due(stats, cfg):
         findings.append(
             Finding("shot_charts", season, "no curated partition for this season")
         )
-    else:
-        findings += check_shot_charts(shots, season)
 
     for dataset, dataset_season in (
         ("players", None),
