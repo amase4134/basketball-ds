@@ -28,7 +28,7 @@ from nba_pipeline.modeling.features import (
     pythagorean_win_pct,
     roster_strength_by_season,
 )
-from nba_pipeline.transform.clean import clean_rosters
+from nba_pipeline.transform.clean import clean_player_season_stats, clean_rosters
 from nba_pipeline.reporting import email_sender, weekly_win_report
 
 TARGET = "2026-27"
@@ -181,6 +181,57 @@ def test_roster_strength_rates_each_season_with_the_one_before():
     assert second.loc[5, "ROSTER_PLUS_MINUS"] == pytest.approx(
         expected.loc[5, "MINUTE_WEIGHTED_PLUS_MINUS"]
     )
+
+
+def test_a_player_listed_under_two_spellings_collapses_to_one_row():
+    """The feed returned Moussa Cisse and Moussa Cissé as separate 2026-27 rows."""
+    raw = pd.DataFrame(
+        {
+            "PLAYER_ID": [1630619, 1630619, 201939],
+            "PLAYER_NAME": ["Moussa Cisse", "Moussa Cissé", "Stephen Curry"],
+            "TEAM_ID": [1610612742, 1610612742, 1610612744],
+            "GP": [1, 1, 3],
+            "MIN": [3.44, 3.44, 96.0],
+            "PTS": [2.0, 2.0, 30.0],
+        }
+    )
+    cleaned = clean_player_season_stats(raw, "2026-27")
+    assert cleaned["PLAYER_ID"].tolist() == [1630619, 201939]
+    assert not cleaned["PLAYER_ID"].duplicated().any()
+    # Row order is preserved, so downstream sorting is unaffected.
+    assert cleaned["PLAYER_NAME"].tolist() == ["Moussa Cisse", "Stephen Curry"]
+
+
+def test_duplicate_players_keep_the_fullest_stat_line():
+    """When the two rows disagree, the one with more minutes is the real record."""
+    raw = pd.DataFrame(
+        {
+            "PLAYER_ID": [7, 7, 8],
+            "PLAYER_NAME": ["Split A", "Split B", "Solo"],
+            "TEAM_ID": [10, 11, 12],
+            "GP": [2, 9, 5],
+            "MIN": [12.0, 240.0, 100.0],
+        }
+    )
+    cleaned = clean_player_season_stats(raw, "2026-27")
+    kept = cleaned.set_index("PLAYER_ID")
+    assert kept.loc[7, "MIN"] == pytest.approx(240.0)
+    assert kept.loc[7, "GP"] == 9
+    assert len(cleaned) == 2
+
+
+def test_unique_players_pass_through_untouched():
+    raw = pd.DataFrame(
+        {
+            "PLAYER_ID": [3, 1, 2],
+            "PLAYER_NAME": ["C", "A", "B"],
+            "TEAM_ID": [30, 10, 20],
+            "GP": [1, 2, 3],
+            "MIN": [10.0, 20.0, 30.0],
+        }
+    )
+    cleaned = clean_player_season_stats(raw, "2026-27")
+    assert cleaned["PLAYER_ID"].tolist() == [3, 1, 2]
 
 
 def test_clean_rosters_drops_free_agents_and_duplicates():

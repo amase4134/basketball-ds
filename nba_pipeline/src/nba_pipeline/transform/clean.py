@@ -86,7 +86,38 @@ def clean_player_season_stats(df: pd.DataFrame, season: str) -> pd.DataFrame:
         out["TEAM_ID"] = pd.to_numeric(out["TEAM_ID"], errors="coerce").astype("Int64")
     if "MIN" in out.columns:
         out["MIN"] = pd.to_numeric(out["MIN"], errors="coerce")
-    return out.reset_index(drop=True)
+    return dedupe_players(out, season).reset_index(drop=True)
+
+
+def dedupe_players(df: pd.DataFrame, season: str) -> pd.DataFrame:
+    """Collapse a player who appears more than once in a season.
+
+    The feed occasionally returns one player twice under two spellings of the
+    same name — "Moussa Cisse" and "Moussa Cissé" shared an ID, a team and an
+    identical stat line in 2026-27. Downstream code treats PLAYER_ID as unique
+    per season, so keep the fullest row: most minutes first, then most games.
+    """
+    if "PLAYER_ID" not in df.columns:
+        return df
+    duplicated = df["PLAYER_ID"].duplicated(keep=False)
+    if not duplicated.any():
+        return df
+
+    for player_id, rows in df[duplicated].groupby("PLAYER_ID"):
+        names = sorted(set(rows.get("PLAYER_NAME", pd.Series(dtype="object")).dropna()))
+        logger.warning(
+            "%s: PLAYER_ID %s appears %s times (%s); keeping the fullest row",
+            season,
+            player_id,
+            len(rows),
+            ", ".join(names) or "no names",
+        )
+
+    order = [c for c in ("MIN", "GP") if c in df.columns]
+    ranked = df.sort_values(order, ascending=False, kind="stable") if order else df
+    return ranked.drop_duplicates("PLAYER_ID", keep="first").loc[
+        lambda frame: frame.index.sort_values()
+    ]
 
 
 def clean_team_season_stats(df: pd.DataFrame, season: str) -> pd.DataFrame:
