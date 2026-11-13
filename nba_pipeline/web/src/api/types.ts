@@ -80,11 +80,20 @@ export interface Comparison {
   meta: { season: string; requested: number[]; returned: number };
 }
 
+export type PlayoffTier = 'Playoffs' | 'Play-in' | 'Lottery';
+export type Conference = 'East' | 'West';
+
 /** One team's projection and its accuracy so far in the tracked season. */
 export interface WinPredictionRow {
   TEAM_ID: number;
   TEAM_NAME: string | null;
   TEAM_ABBREVIATION: string | null;
+  conference: Conference | null;
+  conference_rank: number | null;
+  preseason_conference_rank: number | null;
+  actual_conference_rank: number | null;
+  playoff_tier: PlayoffTier | null;
+  preseason_playoff_tier: PlayoffTier | null;
   games_played: number;
   actual_wins: number;
   actual_losses: number;
@@ -103,6 +112,26 @@ export interface WinPredictionRow {
   updated_rank: number | null;
   actual_rank: number | null;
   season: string;
+}
+
+/** One row on a conference playoff board. */
+export interface ConferenceStandingRow {
+  TEAM_ID: number;
+  TEAM_ABBREVIATION: string | null;
+  TEAM_NAME: string | null;
+  conference: Conference;
+  conference_rank: number | null;
+  preseason_conference_rank: number | null;
+  actual_conference_rank: number | null;
+  playoff_tier: PlayoffTier | null;
+  preseason_playoff_tier: PlayoffTier | null;
+  updated_pred_wins: number;
+  preseason_pred_wins: number;
+  games_played: number;
+  actual_wins: number;
+  actual_losses: number;
+  actual_win_pct: number | null;
+  current_82_pace: number | null;
 }
 
 export interface ModelAccuracy {
@@ -157,6 +186,8 @@ export interface WinPredictionSummary {
   play_in_tier_accuracy: number | null;
   overperformers: SurpriseTeam[];
   underperformers: SurpriseTeam[];
+  conferences: Record<Conference, ConferenceStandingRow[]>;
+  playoff_counts: Record<Conference, { playoffs: number; play_in: number; lottery: number }>;
   training: TrainingAccuracy;
 }
 

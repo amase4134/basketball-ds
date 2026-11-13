@@ -161,9 +161,10 @@ accuracy can be charted. Re-running on the same day replaces that day's rows rat
 duplicating them.
 
 Tracked per team: games played, actual record, the wins each model expected by this point,
-the error against each, the current 82-game pace, and the blended final projection.
-League-wide: MAE and RMSE for both models, 82-game pace error, Spearman rank correlation against
-the real standings, and playoff-tier hit rate.
+the error against each, the current 82-game pace, the blended final projection, East/West
+conference membership, projected conference seed, and playoff tier (Playoffs / Play-in /
+Lottery). League-wide: MAE and RMSE for both models, 82-game pace error, Spearman rank
+correlation against the real standings, and conference-aware playoff-tier hit rate.
 
 Before opening night the NBA API returns no rows for the season at all, so the pipeline writes a
 30-team partition at zero games and the tracker reports the locked projection with accuracy
@@ -199,8 +200,9 @@ python -m nba_pipeline send-win-report --dry-run        # render and archive onl
 python -m nba_pipeline send-win-report --to me@example.com
 ```
 
-It covers the accuracy scorecard, the week-over-week change in each metric, the five biggest
-over- and underperformers, and the full 30-team table. Each run also archives the HTML to
+It covers the accuracy scorecard, the week-over-week change in each metric, East/West
+projected playoff standings, the top 10 overperformers and bottom 5 underperformers
+versus the pre-season model, and the full 30-team table. Each run also archives the HTML to
 `data/meta/reports/weekly_win_report_YYYY-MM-DD.html`.
 
 Configure delivery once:

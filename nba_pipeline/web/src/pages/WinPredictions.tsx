@@ -1,7 +1,16 @@
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api, queryString } from '../api/client';
-import type { SortDirection, SurpriseTeam, WinPredictionHistory, WinPredictionRow, WinPredictions as WinPredictionsResponse } from '../api/types';
+import type {
+  Conference,
+  ConferenceStandingRow,
+  PlayoffTier,
+  SortDirection,
+  SurpriseTeam,
+  WinPredictionHistory,
+  WinPredictionRow,
+  WinPredictions as WinPredictionsResponse,
+} from '../api/types';
 import { AccuracyTrend, TeamTrajectory } from '../components/AccuracyTrend';
 import { AsyncState } from '../components/AsyncState';
 import { StatCards } from '../components/StatCards';
@@ -23,6 +32,9 @@ interface Column {
 
 const COLUMNS: Column[] = [
   { key: 'TEAM_ABBREVIATION', label: 'Team', hint: 'Team' },
+  { key: 'conference', label: 'Conf', hint: 'Conference' },
+  { key: 'conference_rank', label: 'Seed', hint: 'Projected conference seed from updated wins', digits: 0, numeric: true },
+  { key: 'playoff_tier', label: 'Tier', hint: 'Playoffs (1–6), Play-in (7–10), or Lottery' },
   { key: 'games_played', label: 'GP', hint: 'Games played', digits: 0, numeric: true, inSeasonOnly: true },
   { key: 'record', sortKey: 'actual_wins', label: 'W-L', hint: 'Actual record', numeric: true, inSeasonOnly: true },
   { key: 'preseason_expected_wins_at_gp', label: 'Exp W', hint: 'Wins the pre-season model expected by this point', digits: 1, numeric: true, inSeasonOnly: true },
@@ -111,6 +123,13 @@ export function WinPredictions() {
 
               <StatCards cards={summaryCards(data)} />
 
+              <h2>Projected playoff picture</h2>
+              <p className="hint">
+                Top 6 in each conference clinch; seeds 7–10 play in. Ranked by{' '}
+                {started ? 'updated' : 'pre-season'} 82-game projection.
+              </p>
+              <ConferenceBoards summary={summary} started={started} />
+
               <h2>{started ? 'Projection versus reality' : 'Pre-season projection'}</h2>
               <WinProjectionChart rows={items} started={started} />
 
@@ -127,8 +146,8 @@ export function WinPredictions() {
                 <>
                   <h2>Biggest surprises</h2>
                   <div className="surprise-grid">
-                    <SurpriseList title="Overperforming the pre-season model" rows={summary.overperformers} tone="positive" />
-                    <SurpriseList title="Underperforming the pre-season model" rows={summary.underperformers} tone="negative" />
+                    <SurpriseList title="Top 10 overperformers" rows={summary.overperformers} tone="positive" />
+                    <SurpriseList title="Bottom 5 underperformers" rows={summary.underperformers} tone="negative" />
                   </div>
                 </>
               )}
@@ -204,9 +223,10 @@ export function WinPredictions() {
 
 function summaryCards(data: WinPredictionsResponse) {
   const { summary, meta } = data;
-  const { training } = summary;
   const started = summary.season_started;
   const seasons = meta.training_seasons;
+  const eastPlayoffs = summary.playoff_counts?.East?.playoffs ?? 0;
+  const westPlayoffs = summary.playoff_counts?.West?.playoffs ?? 0;
 
   return [
     {
@@ -220,6 +240,11 @@ function summaryCards(data: WinPredictionsResponse) {
       note: started ? `${fmtPercent(summary.season_progress_pct)} played` : 'not tipped off yet',
     },
     {
+      label: 'Projected playoffs',
+      value: `${eastPlayoffs} East · ${westPlayoffs} West`,
+      note: 'automatic berths per conference',
+    },
+    {
       label: 'Pre-season MAE',
       value: started ? `${fmtNumber(summary.mae_preseason_at_gp, 2)} wins` : '—',
       note: started ? 'versus wins banked' : 'awaiting first games',
@@ -230,16 +255,77 @@ function summaryCards(data: WinPredictionsResponse) {
       note: started ? 'versus wins banked' : 'awaiting first games',
     },
     {
-      label: 'Rank correlation',
-      value: fmtNumber(summary.spearman_rho, 3),
-      note: started ? 'projected vs actual order' : 'awaiting first games',
-    },
-    {
-      label: 'Cross-validated MAE',
-      value: `${fmtNumber(training.profile_model.mae, 2)} wins`,
-      note: `in-season model, R² ${fmtNumber(training.profile_model.r2, 2)}`,
+      label: 'Playoff tier hit rate',
+      value: started ? fmtPercent(summary.playoff_tier_accuracy) : '—',
+      note: started ? 'projected vs actual top-6 seeds' : 'awaiting first games',
     },
   ];
+}
+
+function ConferenceBoards({
+  summary,
+  started,
+}: {
+  summary: WinPredictionsResponse['summary'];
+  started: boolean;
+}) {
+  const boards = summary.conferences ?? { East: [], West: [] };
+  return (
+    <div className="conference-grid">
+      {(['East', 'West'] as Conference[]).map(conference => (
+        <ConferenceBoard
+          key={conference}
+          conference={conference}
+          rows={boards[conference] ?? []}
+          started={started}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ConferenceBoard({
+  conference,
+  rows,
+  started,
+}: {
+  conference: Conference;
+  rows: ConferenceStandingRow[];
+  started: boolean;
+}) {
+  if (rows.length === 0) {
+    return <p className="notice notice-quiet">{conference}ern Conference: no projections yet.</p>;
+  }
+  return (
+    <section className="conference-card" aria-label={`${conference}ern Conference projected standings`}>
+      <h3>{conference}ern Conference</h3>
+      <ol className="conference-standings">
+        {rows.map(row => (
+          <li key={row.TEAM_ID} className={tierClass(row.playoff_tier)}>
+            <span className="conference-seed">{fmtNumber(row.conference_rank, 0)}</span>
+            <strong>{row.TEAM_ABBREVIATION ?? row.TEAM_NAME ?? row.TEAM_ID}</strong>
+            <span className="conference-wins">
+              {fmtNumber(started ? row.updated_pred_wins : row.preseason_pred_wins, 1)} wins
+            </span>
+            <span className="conference-tier">{row.playoff_tier ?? '—'}</span>
+            {started && (
+              <small>
+                {fmtNumber(row.actual_wins, 0)}-{fmtNumber(row.actual_losses, 0)}
+                {row.actual_conference_rank != null ? ` · actual seed ${fmtNumber(row.actual_conference_rank, 0)}` : ''}
+              </small>
+            )}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function tierClass(tier: PlayoffTier | null | undefined): string | undefined {
+  if (tier === 'Playoffs') return 'is-playoffs';
+  if (tier === 'Play-in') return 'is-play-in';
+  if (tier === 'Lottery') return 'is-lottery';
+  return undefined;
 }
 
 function SurpriseList({ title, rows, tone }: { title: string; rows: SurpriseTeam[]; tone: 'positive' | 'negative' }) {
@@ -275,6 +361,8 @@ function signed(value: number | null | undefined, digits: number): string {
 function cellValue(column: Column, row: WinPredictionRow): string {
   if (column.key === 'record') return `${fmtNumber(row.actual_wins, 0)}-${fmtNumber(row.actual_losses, 0)}`;
   if (column.key === 'TEAM_ABBREVIATION') return row.TEAM_ABBREVIATION ?? String(row.TEAM_ID);
+  if (column.key === 'conference') return row.conference ?? '—';
+  if (column.key === 'playoff_tier') return row.playoff_tier ?? '—';
   const value = row[column.key as keyof WinPredictionRow];
   if (column.signed) return signed(value as number | null, column.digits ?? 1);
   return fmtNumber(value, column.digits);
@@ -288,6 +376,10 @@ function cellClass(column: Column, row: WinPredictionRow): string | undefined {
     if (Number.isFinite(value) && Math.abs(value) >= 0.05) {
       classes.push(value > 0 ? 'is-above' : 'is-below');
     }
+  }
+  if (column.key === 'playoff_tier') {
+    const tier = tierClass(row.playoff_tier);
+    if (tier) classes.push(tier);
   }
   return classes.length > 0 ? classes.join(' ') : undefined;
 }

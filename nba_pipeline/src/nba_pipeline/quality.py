@@ -170,6 +170,16 @@ def check_teams(df: pd.DataFrame) -> list[Finding]:
         findings.append(Finding("teams", None, "null TEAM_ID values"))
     if "FULL_NAME" in df.columns and df["FULL_NAME"].isna().any():
         findings.append(Finding("teams", None, "null FULL_NAME values"))
+    if "CONFERENCE" in df.columns:
+        if df["CONFERENCE"].isna().any():
+            findings.append(Finding("teams", None, "null CONFERENCE values"))
+        unexpected = sorted(
+            set(df["CONFERENCE"].dropna().astype(str)) - {"East", "West"}
+        )
+        if unexpected:
+            findings.append(
+                Finding("teams", None, f"unexpected CONFERENCE values: {unexpected}")
+            )
     return findings
 
 

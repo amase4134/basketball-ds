@@ -156,7 +156,8 @@ def test_win_prediction_summary_matches_the_season_state():
         assert all(summary[key] is not None for key in scored)
         assert summary['rmse_preseason_at_gp'] >= summary['mae_preseason_at_gp']
         assert -1 <= summary['spearman_rho'] <= 1
-        assert len(summary['overperformers']) <= 5
+        assert len(summary['overperformers']) <= 10
+        assert len(summary['underperformers']) <= 5
     else:
         # Before opening night there are no results to score against.
         assert all(summary[key] is None for key in scored)
@@ -242,11 +243,14 @@ def test_in_season_predictions_report_live_accuracy(in_season_client):
     assert summary['mae_preseason_at_gp'] is not None
     assert summary['rmse_preseason_at_gp'] >= summary['mae_preseason_at_gp']
     assert -1 <= summary['spearman_rho'] <= 1
-    assert len(summary['overperformers']) == 5
+    assert len(summary['overperformers']) == 10
     assert len(summary['underperformers']) == 5
     # Overperformers beat their expectation; underperformers trail it.
     assert summary['overperformers'][0]['preseason_win_error_at_gp'] >= 0
     assert summary['underperformers'][0]['preseason_win_error_at_gp'] <= 0
+    assert set(summary['conferences']) == {'East', 'West'}
+    assert len(summary['conferences']['East']) == 15
+    assert summary['playoff_counts']['East']['playoffs'] == 6
     # Reading the season as it happens beats the pre-season forecast.
     assert summary['mae_inseason_at_gp'] < summary['mae_preseason_at_gp']
 

@@ -182,13 +182,21 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
             known = prediction_seasons(connection)
             target = season or (known[0] if known else cfg.target_season)
             if target not in known: raise HTTPException(404, f"No win predictions for season {target}")
-            items = rows(safe_execute(connection, f"SELECT {PREDICTION_COLUMNS} FROM win_predictions WHERE season = ? ORDER BY {PREDICTION_SORTS[sort]} {direction.upper()} NULLS LAST, TEAM_ID", [target]))
-        # Accuracy is summarised from the same frame the UI renders, so the
-        # cards and the table can never disagree.
+        # Enrich on read so older partitions still expose conference seeds, and
+        # summarise against the same frame the table renders.
         frame = tracking.load_predictions(target, cfg=cfg)
+        ascending = direction == "asc"
+        ordered = frame.sort_values(
+            [sort, "TEAM_ID"],
+            ascending=[ascending, True],
+            na_position="last",
+        )
+        columns = [c.strip() for c in PREDICTION_COLUMNS.split(",")]
+        present = [c for c in columns if c in ordered.columns]
+        items = frame_records(ordered[present])
         summary = jsonable(tracking.summarise(frame))
         summary["training"] = jsonable(training_accuracy())
-        return {"items": jsonable(items), "summary": summary, "meta": {"season": target, "seasons": known, "sort": sort, "direction": direction, "games_per_season": GAMES_PER_SEASON, "training_seasons": summary["training"]["training_seasons"]}}
+        return {"items": items, "summary": summary, "meta": {"season": target, "seasons": known, "sort": sort, "direction": direction, "games_per_season": GAMES_PER_SEASON, "training_seasons": summary["training"]["training_seasons"]}}
 
     @app.get("/api/v1/predictions/wins/history")
     def win_prediction_history(season: str | None = None, team_id: int | None = None):

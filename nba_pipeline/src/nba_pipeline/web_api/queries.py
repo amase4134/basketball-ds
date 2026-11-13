@@ -20,7 +20,9 @@ SHOT_RANGES = {c: c for c in "SHOT_DISTANCE LOC_X LOC_Y".split()}
 MAX_SELECTED_IDS = 12
 
 PREDICTION_COLUMNS = (
-    "TEAM_ID, TEAM_NAME, TEAM_ABBREVIATION, games_played, actual_wins, actual_losses, "
+    "TEAM_ID, TEAM_NAME, TEAM_ABBREVIATION, conference, conference_rank, "
+    "preseason_conference_rank, actual_conference_rank, playoff_tier, "
+    "preseason_playoff_tier, games_played, actual_wins, actual_losses, "
     "actual_win_pct, current_82_pace, net_rating, preseason_pred_wins, "
     "inseason_talent_wins_82, preseason_expected_wins_at_gp, "
     "inseason_expected_wins_at_gp, preseason_win_error_at_gp, "
@@ -30,11 +32,13 @@ PREDICTION_COLUMNS = (
 PREDICTION_SORTS = {
     c: c
     for c in (
-        "TEAM_ABBREVIATION TEAM_NAME games_played actual_wins actual_losses "
-        "actual_win_pct current_82_pace net_rating preseason_pred_wins "
-        "inseason_talent_wins_82 preseason_expected_wins_at_gp "
-        "inseason_expected_wins_at_gp preseason_win_error_at_gp "
-        "inseason_win_error_at_gp updated_pred_wins preseason_rank updated_rank"
+        "TEAM_ABBREVIATION TEAM_NAME conference conference_rank "
+        "preseason_conference_rank actual_conference_rank playoff_tier "
+        "games_played actual_wins actual_losses actual_win_pct current_82_pace "
+        "net_rating preseason_pred_wins inseason_talent_wins_82 "
+        "preseason_expected_wins_at_gp inseason_expected_wins_at_gp "
+        "preseason_win_error_at_gp inseason_win_error_at_gp updated_pred_wins "
+        "preseason_rank updated_rank"
     ).split()
 }
 DATASET_NAMES = (

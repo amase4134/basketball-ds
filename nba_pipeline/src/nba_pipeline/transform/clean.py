@@ -37,6 +37,8 @@ def clean_players(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def clean_teams(df: pd.DataFrame) -> pd.DataFrame:
+    from nba_pipeline.modeling.conferences import conference_for_teams_frame
+
     out = df.copy()
     rename = {
         "id": "TEAM_ID",
@@ -50,6 +52,7 @@ def clean_teams(df: pd.DataFrame) -> pd.DataFrame:
     out = out.rename(columns={k: v for k, v in rename.items() if k in out.columns})
     if "TEAM_ID" in out.columns:
         out["TEAM_ID"] = out["TEAM_ID"].astype("int64")
+    out["CONFERENCE"] = conference_for_teams_frame(out)
     cols = [
         c
         for c in [
@@ -60,6 +63,7 @@ def clean_teams(df: pd.DataFrame) -> pd.DataFrame:
             "CITY",
             "STATE",
             "YEAR_FOUNDED",
+            "CONFERENCE",
         ]
         if c in out.columns
     ]

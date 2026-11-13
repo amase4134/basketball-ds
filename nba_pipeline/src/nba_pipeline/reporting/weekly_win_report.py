@@ -17,10 +17,9 @@ import pandas as pd
 
 from nba_pipeline.config import GAMES_PER_SEASON, Settings, settings
 from nba_pipeline.modeling import tracking
+from nba_pipeline.modeling.tracking import OVERPERFORMER_COUNT, UNDERPERFORMER_COUNT
 
 logger = logging.getLogger(__name__)
-
-SURPRISE_COUNT = 5
 
 # Metrics where a decrease is an improvement, used to label week-over-week moves.
 LOWER_IS_BETTER = {
@@ -45,6 +44,9 @@ METRIC_LABELS = {
 
 IN_SEASON_TABLE_COLUMNS = [
     ("TEAM_ABBREVIATION", "Team", "{}"),
+    ("conference", "Conf", "{}"),
+    ("conference_rank", "Seed", "{:.0f}"),
+    ("playoff_tier", "Tier", "{}"),
     ("games_played", "GP", "{:.0f}"),
     ("record", "W-L", "{}"),
     ("preseason_expected_wins_at_gp", "Exp W", "{:.1f}"),
@@ -59,6 +61,9 @@ IN_SEASON_TABLE_COLUMNS = [
 # Before tip-off the in-season columns carry no information worth showing.
 PRESEASON_TABLE_COLUMNS = [
     ("TEAM_ABBREVIATION", "Team", "{}"),
+    ("conference", "Conf", "{}"),
+    ("conference_rank", "Seed", "{:.0f}"),
+    ("playoff_tier", "Tier", "{}"),
     ("preseason_rank", "Rank", "{:.0f}"),
     ("preseason_pred_wins", "Proj W", "{:.1f}"),
     ("preseason_proj_losses", "Proj L", "{:.1f}"),
@@ -234,13 +239,14 @@ def _render_text(
         lines += ["", "WEEK OVER WEEK", "  No snapshot from a week ago to compare against yet."]
 
     if summary.get("overperformers"):
-        lines += ["", f"BIGGEST OVERPERFORMERS (top {SURPRISE_COUNT})"]
+        lines += ["", f"TOP {OVERPERFORMER_COUNT} OVERPERFORMERS"]
         lines += [f"  {line}" for line in _surprise_lines(summary["overperformers"])]
     if summary.get("underperformers"):
-        lines += ["", f"BIGGEST UNDERPERFORMERS (top {SURPRISE_COUNT})"]
+        lines += ["", f"BOTTOM {UNDERPERFORMER_COUNT} UNDERPERFORMERS"]
         lines += [f"  {line}" for line in _surprise_lines(summary["underperformers"])]
 
     started = bool(summary.get("season_started"))
+    lines += _conference_board_lines(summary, started=started)
     heading = "FULL PROJECTION TABLE" if started else "PRE-SEASON PROJECTION, ALL 30 TEAMS"
     lines += ["", heading, _text_table(table, table_columns(started))]
     if started:
@@ -249,8 +255,29 @@ def _render_text(
             "Pre 82 = locked pre-season projection. In 82 = projection from current",
             "efficiency. Proj 82 = banked wins plus the projected remainder.",
             "Err = wins above or below the pre-season pace at this point.",
+            "Seed / Tier = projected conference standings (top 6 playoffs, 7–10 play-in).",
         ]
     return "\n".join(lines)
+
+
+def _conference_board_lines(summary: dict, *, started: bool) -> list[str]:
+    boards = summary.get("conferences") or {}
+    if not any(boards.get(name) for name in ("East", "West")):
+        return []
+    win_key = "updated_pred_wins" if started else "preseason_pred_wins"
+    lines = ["", "PROJECTED PLAYOFF PICTURE"]
+    for conference in ("East", "West"):
+        rows = boards.get(conference) or []
+        if not rows:
+            continue
+        lines.append(f"  {conference}ern Conference")
+        for row in rows:
+            seed = _fmt(row.get("conference_rank"), "{:.0f}")
+            team = row.get("TEAM_ABBREVIATION") or row.get("TEAM_NAME") or "?"
+            wins = _fmt(row.get(win_key), "{:.1f}")
+            tier = row.get("playoff_tier") or ""
+            lines.append(f"    {seed:>2}. {team:<4} {wins} wins  {tier}")
+    return lines
 
 
 def _surprise_lines(rows: list[dict]) -> list[str]:
@@ -354,14 +381,19 @@ def _render_html(
     if started:
         sections.append(
             _html_surprises(
-                "Biggest overperformers", summary.get("overperformers") or [], "#047857"
+                f"Top {OVERPERFORMER_COUNT} overperformers",
+                summary.get("overperformers") or [],
+                "#047857",
             )
         )
         sections.append(
             _html_surprises(
-                "Biggest underperformers", summary.get("underperformers") or [], "#b91c1c"
+                f"Bottom {UNDERPERFORMER_COUNT} underperformers",
+                summary.get("underperformers") or [],
+                "#b91c1c",
             )
         )
+    sections.append(_html_conference_boards(summary, started=started))
     sections.append(_html_table(table, started))
     sections.append(_html_footer(started))
 
@@ -452,6 +484,61 @@ def _html_deltas(deltas: dict | None) -> str:
         f"{html.escape(str(deltas['compared_to']))}. Green is an improvement.</p>"
         '<table style="width:100%;border-collapse:collapse;font-size:13px;">'
         f"{''.join(rows)}</table></div>"
+    )
+
+
+def _html_conference_boards(summary: dict, *, started: bool) -> str:
+    boards = summary.get("conferences") or {}
+    if not any(boards.get(name) for name in ("East", "West")):
+        return ""
+    win_key = "updated_pred_wins" if started else "preseason_pred_wins"
+    columns = "".join(
+        _html_conference_column(conference, boards.get(conference) or [], win_key)
+        for conference in ("East", "West")
+    )
+    return (
+        '<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;'
+        'padding:16px 18px;margin:12px 0;">'
+        '<h2 style="margin:0 0 4px;font-size:15px;">Projected playoff picture</h2>'
+        '<p style="margin:0 0 12px;font-size:12px;color:#6b7280;">'
+        "Top 6 in each conference make the playoffs; seeds 7–10 play in.</p>"
+        '<table role="presentation" cellpadding="0" cellspacing="0" '
+        f'style="width:100%;"><tr>{columns}</tr></table></div>'
+    )
+
+
+def _html_conference_column(
+    conference: str, rows: list[dict], win_key: str
+) -> str:
+    if not rows:
+        return (
+            f'<td style="width:50%;padding:0 8px;vertical-align:top;">'
+            f"<strong>{html.escape(conference)}ern</strong></td>"
+        )
+    tier_fill = {
+        "Playoffs": "#ecfdf5",
+        "Play-in": "#fffbeb",
+    }
+    cells = []
+    for row in rows:
+        fill = tier_fill.get(str(row.get("playoff_tier") or ""), "transparent")
+        cells.append(
+            f'<tr style="background:{fill};">'
+            f'<td style="padding:4px 6px;border-top:1px solid #e5e7eb;width:2rem;">'
+            f'{_fmt(row.get("conference_rank"), "{:.0f}")}</td>'
+            f'<td style="padding:4px 6px;border-top:1px solid #e5e7eb;font-weight:600;">'
+            f'{html.escape(str(row.get("TEAM_ABBREVIATION") or "?"))}</td>'
+            f'<td style="padding:4px 6px;border-top:1px solid #e5e7eb;text-align:right;">'
+            f'{_fmt(row.get(win_key), "{:.1f}")}</td>'
+            f'<td style="padding:4px 6px;border-top:1px solid #e5e7eb;color:#6b7280;">'
+            f'{html.escape(str(row.get("playoff_tier") or ""))}</td></tr>'
+        )
+    return (
+        f'<td style="width:50%;padding:0 8px;vertical-align:top;">'
+        f'<div style="font-size:13px;font-weight:600;margin-bottom:6px;">'
+        f"{html.escape(conference)}ern Conference</div>"
+        '<table style="width:100%;border-collapse:collapse;font-size:12px;">'
+        f"{''.join(cells)}</table></td>"
     )
 
 

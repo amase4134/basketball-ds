@@ -483,6 +483,79 @@ th[aria-sort]:not([aria-sort='none']) { background: var(--accent-soft); }
 td.is-above { color: var(--positive); font-weight: 600; }
 td.is-below { color: var(--negative); font-weight: 600; }
 
+.conference-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  margin: 0 0 1.5rem;
+}
+
+.conference-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem 1.1rem;
+  background: var(--surface);
+}
+
+.conference-card h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.conference-standings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.conference-standings li {
+  display: grid;
+  grid-template-columns: 2rem minmax(3rem, 1fr) auto auto;
+  gap: 0.35rem 0.6rem;
+  align-items: baseline;
+  padding: 0.35rem 0.4rem;
+  border-radius: 6px;
+  margin-bottom: 0.15rem;
+}
+
+.conference-standings li small {
+  grid-column: 2 / -1;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.conference-seed {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.conference-wins {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+}
+
+.conference-tier {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.conference-standings li.is-playoffs,
+td.is-playoffs {
+  background: color-mix(in srgb, var(--positive) 12%, transparent);
+}
+
+.conference-standings li.is-play-in,
+td.is-play-in {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.conference-standings li.is-lottery,
+td.is-lottery {
+  opacity: 0.85;
+}
+
 .surprise-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
