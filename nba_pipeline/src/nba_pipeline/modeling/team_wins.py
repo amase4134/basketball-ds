@@ -36,6 +36,7 @@ from nba_pipeline.config import (
 from nba_pipeline.extract.player_stats import load_curated_player_stats
 from nba_pipeline.extract.rosters import load_season_roster
 from nba_pipeline.extract.team_stats import load_curated_team_stats_many
+from nba_pipeline.modeling.conferences import enrich_playoff_projections
 from nba_pipeline.modeling.features import (
     PRESEASON_FEATURES,
     PROFILE_FEATURES,
@@ -342,6 +343,7 @@ def predict(
         if games.gt(0).any()
         else np.nan
     )
+    frame = enrich_playoff_projections(frame)
     return frame.sort_values("updated_pred_wins", ascending=False).reset_index(drop=True)
 
 
@@ -376,6 +378,7 @@ def rescore_with_preseason(predictions: pd.DataFrame) -> pd.DataFrame:
     frame["updated_rank"] = frame["updated_pred_wins"].rank(
         ascending=False, method="min"
     )
+    frame = enrich_playoff_projections(frame)
     return frame.sort_values("updated_pred_wins", ascending=False).reset_index(drop=True)
 
 

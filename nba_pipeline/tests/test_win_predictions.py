@@ -19,6 +19,12 @@ from nba_pipeline.extract.rosters import load_season_roster
 from nba_pipeline.extract.team_stats import preseason_skeleton
 from nba_pipeline.load.parquet import replace_season_partition, write_static_table
 from nba_pipeline.modeling import team_wins, tracking
+from nba_pipeline.modeling.conferences import (
+    PLAYOFF_SEEDS,
+    conference_for,
+    enrich_playoff_projections,
+    playoff_tier,
+)
 from nba_pipeline.modeling.features import (
     TEAM_SEASON_MINUTES,
     build_profile_frame,
@@ -505,6 +511,10 @@ def test_preseason_prediction_has_no_in_season_information(preseason):
     )
     assert (predictions["inseason_talent_wins_82"] == GAMES_PER_SEASON / 2).all()
     assert predictions["preseason_rank"].nunique() == TEAMS
+    assert set(predictions["conference"]) == {"East", "West"}
+    assert (predictions.groupby("conference").size() == 15).all()
+    assert predictions["playoff_tier"].isin(["Playoffs", "Play-in", "Lottery"]).all()
+    assert (predictions["playoff_tier"] == "Playoffs").sum() == PLAYOFF_SEEDS * 2
 
 
 def test_an_offseason_trade_moves_the_preseason_projection(preseason):
@@ -540,6 +550,46 @@ def test_preseason_summary_reports_no_accuracy_yet(preseason):
     # Training accuracy is known even before a game is played.
     assert summary["cv_mae_profile"] == pytest.approx(model.profile_metrics.mae)
     assert summary["training_seasons"] == TRAINING
+    assert set(summary["conferences"]) == {"East", "West"}
+    assert len(summary["conferences"]["East"]) == 15
+    assert len(summary["conferences"]["West"]) == 15
+    assert summary["playoff_counts"]["East"]["playoffs"] == PLAYOFF_SEEDS
+    assert summary["playoff_counts"]["West"]["playoffs"] == PLAYOFF_SEEDS
+
+
+def test_conference_lookup_covers_the_real_league():
+    assert conference_for(abbreviation="NYK") == "East"
+    assert conference_for(abbreviation="LAL") == "West"
+    assert conference_for(team_id=1610612740) == "West"  # NOP
+    assert playoff_tier(1) == "Playoffs"
+    assert playoff_tier(6) == "Playoffs"
+    assert playoff_tier(7) == "Play-in"
+    assert playoff_tier(10) == "Play-in"
+    assert playoff_tier(11) == "Lottery"
+
+
+def test_conference_ranks_follow_projected_wins_inside_each_conference():
+    frame = pd.DataFrame(
+        {
+            "TEAM_ID": [1, 2, 3, 4],
+            "TEAM_ABBREVIATION": ["BOS", "NYK", "LAL", "GSW"],
+            "TEAM_NAME": ["Boston", "New York", "Lakers", "Warriors"],
+            "updated_pred_wins": [55.0, 50.0, 52.0, 48.0],
+            "preseason_pred_wins": [54.0, 51.0, 53.0, 47.0],
+            "actual_win_pct": [0.7, 0.6, 0.65, 0.55],
+            "games_played": [20, 20, 20, 20],
+            "actual_wins": [14, 12, 13, 11],
+            "actual_losses": [6, 8, 7, 9],
+            "current_82_pace": [57.4, 49.2, 53.3, 45.1],
+            "season": TARGET,
+        }
+    )
+    enriched = enrich_playoff_projections(frame).set_index("TEAM_ABBREVIATION")
+    assert enriched.loc["BOS", "conference"] == "East"
+    assert enriched.loc["BOS", "conference_rank"] == 1
+    assert enriched.loc["NYK", "conference_rank"] == 2
+    assert enriched.loc["LAL", "conference_rank"] == 1
+    assert enriched.loc["GSW", "playoff_tier"] == "Playoffs"
 
 
 # --- In-season tracking ---------------------------------------------------
@@ -589,10 +639,18 @@ def test_midseason_summary_populates_every_accuracy_metric(midseason):
     # RMSE penalises large misses, so it can never sit below MAE.
     assert summary["rmse_preseason_at_gp"] >= summary["mae_preseason_at_gp"]
     assert -1.0 <= summary["spearman_rho"] <= 1.0
-    assert len(summary["overperformers"]) == 5
+    assert len(summary["overperformers"]) == 10
     assert len(summary["underperformers"]) == 5
     assert summary["overperformers"][0]["preseason_win_error_at_gp"] >= 0
     assert summary["underperformers"][0]["preseason_win_error_at_gp"] <= 0
+    assert (
+        summary["overperformers"][0]["preseason_win_error_at_gp"]
+        >= summary["overperformers"][-1]["preseason_win_error_at_gp"]
+    )
+    assert (
+        summary["underperformers"][0]["preseason_win_error_at_gp"]
+        <= summary["underperformers"][-1]["preseason_win_error_at_gp"]
+    )
 
 
 def test_in_season_model_beats_the_preseason_model_on_the_same_games(midseason):
@@ -764,6 +822,10 @@ def test_preseason_report_explains_that_nothing_has_been_played(preseason):
     # In-season columns carry no information yet, so they stay out.
     assert "Exp W" not in report.text_body
     assert "Proj W" in report.text_body
+    assert "PROJECTED PLAYOFF PICTURE" in report.text_body
+    assert "Eastern Conference" in report.text_body
+    assert "Western Conference" in report.text_body
+    assert "Projected playoff picture" in report.html_body
     assert report.html_body.startswith("<!DOCTYPE html>")
 
 
@@ -771,10 +833,15 @@ def test_midseason_report_leads_with_accuracy(midseason):
     report = report_for(midseason)
     assert "win MAE through 30 games" in report.subject
     assert "MODEL ACCURACY" in report.text_body
-    assert "BIGGEST OVERPERFORMERS" in report.text_body
-    assert "BIGGEST UNDERPERFORMERS" in report.text_body
+    assert "TOP 10 OVERPERFORMERS" in report.text_body
+    assert "BOTTOM 5 UNDERPERFORMERS" in report.text_body
+    assert "Top 10 overperformers" in report.html_body
+    assert "Bottom 5 underperformers" in report.html_body
     assert "CROSS-VALIDATED TRAINING ACCURACY" in report.text_body
     assert "FULL PROJECTION TABLE" in report.text_body
+    assert "PROJECTED PLAYOFF PICTURE" in report.text_body
+    assert "Eastern Conference" in report.html_body
+    assert "Western Conference" in report.html_body
     # Every team appears in the table.
     for abbreviation in (f"T{i:02d}" for i in range(1, TEAMS + 1)):
         assert abbreviation in report.text_body

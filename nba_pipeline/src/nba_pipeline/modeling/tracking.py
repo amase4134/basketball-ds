@@ -21,15 +21,22 @@ from scipy.stats import spearmanr
 
 from nba_pipeline.config import GAMES_PER_SEASON, Settings, settings
 from nba_pipeline.load.parquet import replace_season_partition, write_parquet
+from nba_pipeline.modeling.conferences import (
+    PLAY_IN_SEEDS,
+    PLAYOFF_SEEDS,
+    conference_boards,
+    enrich_playoff_projections,
+)
 from nba_pipeline.modeling.team_wins import TrainedWinModel
 
 logger = logging.getLogger(__name__)
 
-# Conference playoff cutoffs: the top 6 seeds qualify directly, 7–10 play in.
-PLAYOFF_SEEDS = 6
-PLAY_IN_SEEDS = 10
-
 SNAPSHOT_KEYS = ["as_of_date", "TEAM_ID"]
+
+# Surprises versus the locked pre-season pace: more room for overperformers,
+# a shorter underperformer list keeps the digest focused.
+OVERPERFORMER_COUNT = 10
+UNDERPERFORMER_COUNT = 5
 
 
 def _mae(actual: pd.Series, predicted: pd.Series) -> float | None:
@@ -56,76 +63,94 @@ def _spearman(actual: pd.Series, predicted: pd.Series) -> float | None:
 
 
 def _tier_accuracy(predictions: pd.DataFrame, cutoff: int) -> float | None:
-    """Share of the predicted top-`cutoff` league seeds that actually hold one.
+    """Share of projected top-`cutoff` conference seeds that actually hold one.
 
-    Conference assignment is not in the curated warehouse, so this is measured
-    league-wide against twice the conference cutoff.
+    Measured inside each conference (six automatic berths, four play-in spots)
+    and pooled across East and West.
     """
-    pair = predictions[["updated_pred_wins", "actual_win_pct"]].dropna()
-    if len(pair) < cutoff * 2:
+    required = {"conference", "updated_pred_wins", "actual_win_pct"}
+    if predictions.empty or not required.issubset(predictions.columns):
         return None
-    size = cutoff * 2
-    predicted_top = set(
-        pair["updated_pred_wins"].nlargest(size, keep="all").index[:size]
-    )
-    actual_top = set(pair["actual_win_pct"].nlargest(size, keep="all").index[:size])
-    return len(predicted_top & actual_top) / size
+
+    hits = 0
+    total = 0
+    for _, group in predictions.groupby("conference"):
+        pair = group[["updated_pred_wins", "actual_win_pct"]].dropna()
+        if len(pair) < cutoff:
+            return None
+        predicted_top = set(pair["updated_pred_wins"].nlargest(cutoff).index)
+        actual_top = set(pair["actual_win_pct"].nlargest(cutoff).index)
+        hits += len(predicted_top & actual_top)
+        total += cutoff
+    if total == 0:
+        return None
+    return hits / total
 
 
 def summarise(predictions: pd.DataFrame, model: TrainedWinModel | None = None) -> dict:
     """League-wide accuracy of both models at the current point in the season."""
-    games = predictions["games_played"]
-    started = bool(games.gt(0).any())
+    frame = (
+        enrich_playoff_projections(predictions)
+        if not predictions.empty
+        else predictions
+    )
+    games = frame["games_played"] if not frame.empty else pd.Series(dtype="float64")
+    started = bool(games.gt(0).any()) if not frame.empty else False
     summary: dict = {
-        "season": predictions["season"].iloc[0] if not predictions.empty else None,
+        "season": frame["season"].iloc[0] if not frame.empty else None,
         "as_of_date": date.today().isoformat(),
-        "teams": int(len(predictions)),
+        "teams": int(len(frame)),
         "season_started": started,
-        "games_played_avg": float(games.mean()) if not predictions.empty else 0.0,
-        "games_played_max": float(games.max()) if not predictions.empty else 0.0,
+        "games_played_avg": float(games.mean()) if not frame.empty else 0.0,
+        "games_played_max": float(games.max()) if not frame.empty else 0.0,
         "season_progress_pct": (
-            float(games.mean() / GAMES_PER_SEASON) if not predictions.empty else 0.0
+            float(games.mean() / GAMES_PER_SEASON) if not frame.empty else 0.0
         ),
-        "total_games_played": float(games.sum()) if not predictions.empty else 0.0,
+        "total_games_played": float(games.sum()) if not frame.empty else 0.0,
+        "conferences": conference_boards(frame),
     }
 
     if started:
-        actual = predictions["actual_wins"]
+        actual = frame["actual_wins"]
         summary.update(
             {
                 "mae_preseason_at_gp": _mae(
-                    actual, predictions["preseason_expected_wins_at_gp"]
+                    actual, frame["preseason_expected_wins_at_gp"]
                 ),
                 "rmse_preseason_at_gp": _rmse(
-                    actual, predictions["preseason_expected_wins_at_gp"]
+                    actual, frame["preseason_expected_wins_at_gp"]
                 ),
                 "mae_inseason_at_gp": _mae(
-                    actual, predictions["inseason_expected_wins_at_gp"]
+                    actual, frame["inseason_expected_wins_at_gp"]
                 ),
                 "rmse_inseason_at_gp": _rmse(
-                    actual, predictions["inseason_expected_wins_at_gp"]
+                    actual, frame["inseason_expected_wins_at_gp"]
                 ),
                 "mae_pace_82_preseason": _mae(
-                    predictions["current_82_pace"], predictions["preseason_pred_wins"]
+                    frame["current_82_pace"], frame["preseason_pred_wins"]
                 ),
                 "rmse_pace_82_preseason": _rmse(
-                    predictions["current_82_pace"], predictions["preseason_pred_wins"]
+                    frame["current_82_pace"], frame["preseason_pred_wins"]
                 ),
                 "mae_pace_82_updated": _mae(
-                    predictions["current_82_pace"], predictions["updated_pred_wins"]
+                    frame["current_82_pace"], frame["updated_pred_wins"]
                 ),
                 "spearman_rho": _spearman(
-                    predictions["actual_win_pct"], predictions["updated_pred_wins"]
+                    frame["actual_win_pct"], frame["updated_pred_wins"]
                 ),
                 "spearman_rho_preseason": _spearman(
-                    predictions["actual_win_pct"], predictions["preseason_pred_wins"]
+                    frame["actual_win_pct"], frame["preseason_pred_wins"]
                 ),
-                "playoff_tier_accuracy": _tier_accuracy(predictions, PLAYOFF_SEEDS),
-                "play_in_tier_accuracy": _tier_accuracy(predictions, PLAY_IN_SEEDS),
+                "playoff_tier_accuracy": _tier_accuracy(frame, PLAYOFF_SEEDS),
+                "play_in_tier_accuracy": _tier_accuracy(frame, PLAY_IN_SEEDS),
             }
         )
-        summary["overperformers"] = _extremes(predictions, ascending=False)
-        summary["underperformers"] = _extremes(predictions, ascending=True)
+        summary["overperformers"] = _extremes(
+            frame, ascending=False, count=OVERPERFORMER_COUNT
+        )
+        summary["underperformers"] = _extremes(
+            frame, ascending=True, count=UNDERPERFORMER_COUNT
+        )
     else:
         for key in (
             "mae_preseason_at_gp",
@@ -144,6 +169,18 @@ def summarise(predictions: pd.DataFrame, model: TrainedWinModel | None = None) -
         summary["overperformers"] = []
         summary["underperformers"] = []
 
+    summary["playoff_counts"] = {
+        conference: {
+            "playoffs": int((group["playoff_tier"] == "Playoffs").sum()),
+            "play_in": int((group["playoff_tier"] == "Play-in").sum()),
+            "lottery": int((group["playoff_tier"] == "Lottery").sum()),
+        }
+        for conference, group in frame.groupby("conference")
+    } if not frame.empty and "playoff_tier" in frame.columns else {
+        "East": {"playoffs": 0, "play_in": 0, "lottery": 0},
+        "West": {"playoffs": 0, "play_in": 0, "lottery": 0},
+    }
+
     if model is not None:
         summary["training_seasons"] = model.training_seasons
         summary["cv_mae_preseason"] = model.preseason_metrics.mae
@@ -155,7 +192,12 @@ def summarise(predictions: pd.DataFrame, model: TrainedWinModel | None = None) -
     return summary
 
 
-def _extremes(predictions: pd.DataFrame, *, ascending: bool, count: int = 5) -> list[dict]:
+def _extremes(
+    predictions: pd.DataFrame,
+    *,
+    ascending: bool,
+    count: int,
+) -> list[dict]:
     """Teams furthest from their pre-season expectation, in either direction."""
     columns = [
         "TEAM_ID",
@@ -199,7 +241,8 @@ def load_predictions(season: str, *, cfg: Settings | None = None) -> pd.DataFram
         )
     frame = pd.read_parquet(path)
     frame["season"] = season
-    return frame
+    # Older partitions may predate conference columns; enrich on read.
+    return enrich_playoff_projections(frame)
 
 
 def write_metrics(model: TrainedWinModel, *, cfg: Settings | None = None) -> Path:
@@ -234,7 +277,15 @@ def snapshot_rows(predictions: pd.DataFrame, summary: dict) -> pd.DataFrame:
         key: value
         for key, value in summary.items()
         if key
-        not in {"overperformers", "underperformers", "training_seasons", "as_of_date", "season"}
+        not in {
+            "overperformers",
+            "underperformers",
+            "training_seasons",
+            "as_of_date",
+            "season",
+            "conferences",
+            "playoff_counts",
+        }
         and not isinstance(value, (list, dict))
     }
     for key, value in scalar_metrics.items():

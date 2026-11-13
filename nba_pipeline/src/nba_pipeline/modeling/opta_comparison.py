@@ -13,9 +13,11 @@ import pandas as pd
 from scipy.stats import spearmanr
 
 from nba_pipeline.config import GAMES_PER_SEASON
-
-PLAYOFF_SEEDS = 6
-PLAY_IN_SEEDS = 10
+from nba_pipeline.modeling.conferences import (
+    PLAY_IN_SEEDS,
+    PLAYOFF_SEEDS,
+    playoff_tier,
+)
 
 PREDICTION_COLUMNS = [
     "TEAM_ID",
@@ -48,17 +50,9 @@ def build_comparison(predictions: pd.DataFrame, opta: pd.DataFrame) -> pd.DataFr
     )
     # Positive means my model ranks the team higher (a smaller rank number).
     frame["conf_rank_diff"] = frame["opta_conf_rank"] - frame["my_conf_rank"]
-    frame["my_tier"] = frame["my_conf_rank"].map(_tier)
-    frame["opta_tier"] = frame["opta_conf_rank"].map(_tier)
+    frame["my_tier"] = frame["my_conf_rank"].map(playoff_tier)
+    frame["opta_tier"] = frame["opta_conf_rank"].map(playoff_tier)
     return frame.sort_values(["conference", "opta_conf_rank"]).reset_index(drop=True)
-
-
-def _tier(conf_rank: int) -> str:
-    if conf_rank <= PLAYOFF_SEEDS:
-        return "Playoffs"
-    if conf_rank <= PLAY_IN_SEEDS:
-        return "Play-in"
-    return "Lottery"
 
 
 def _overlap(frame: pd.DataFrame, cutoff: int) -> dict[str, int]:

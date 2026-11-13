@@ -190,6 +190,33 @@ def _echo_training_accuracy(model: TrainedWinModel) -> None:
             typer.echo(f"             per-season MAE  {folds}")
 
 
+def _echo_conference_boards(summary: dict, *, started: bool) -> None:
+    boards = summary.get("conferences") or {}
+    win_key = "updated_pred_wins" if started else "preseason_pred_wins"
+    for conference in ("East", "West"):
+        rows = boards.get(conference) or []
+        if not rows:
+            continue
+        typer.echo(f"\n{conference}ern Conference projected standings")
+        typer.echo(
+            f"{'RK':>3} {'TEAM':<5} {'PROJ':>6} {'TIER':<9}"
+            + (f" {'W':>3} {'L':>3}" if started else "")
+        )
+        for row in rows:
+            line = (
+                f"{int(row.get('conference_rank') or 0):>3} "
+                f"{str(row.get('TEAM_ABBREVIATION') or ''):<5} "
+                f"{float(row.get(win_key) or 0):>6.1f} "
+                f"{str(row.get('playoff_tier') or ''):<9}"
+            )
+            if started:
+                line += (
+                    f" {float(row.get('actual_wins') or 0):>3.0f} "
+                    f"{float(row.get('actual_losses') or 0):>3.0f}"
+                )
+            typer.echo(line)
+
+
 def _echo_accuracy_report(predictions: pd.DataFrame, summary: dict) -> None:
     season = summary.get("season")
     if not summary.get("season_started"):
@@ -204,6 +231,7 @@ def _echo_accuracy_report(predictions: pd.DataFrame, summary: dict) -> None:
                 f"{str(row.get('TEAM_ABBREVIATION') or ''):<5} "
                 f"{wins:>7.1f} {GAMES_PER_SEASON - wins:>7.1f}"
             )
+        _echo_conference_boards(summary, started=False)
         return
 
     typer.echo(
@@ -228,18 +256,23 @@ def _echo_accuracy_report(predictions: pd.DataFrame, summary: dict) -> None:
         f"playoff tier={_format_wins(summary['playoff_tier_accuracy'])}"
     )
 
+    _echo_conference_boards(summary, started=True)
+
     typer.echo(
-        f"\n{'TEAM':<5} {'GP':>3} {'W':>3} {'L':>3} {'EXP W':>7} "
-        f"{'ERR':>7} {'PACE':>6} {'PROJ':>6}"
+        f"\n{'TEAM':<5} {'CONF':<5} {'RK':>3} {'GP':>3} {'W':>3} {'L':>3} {'EXP W':>7} "
+        f"{'ERR':>7} {'PACE':>6} {'PROJ':>6} {'TIER':<9}"
     )
     for _, row in predictions.iterrows():
         typer.echo(
             f"{str(row.get('TEAM_ABBREVIATION') or ''):<5} "
+            f"{str(row.get('conference') or ''):<5} "
+            f"{int(row.get('conference_rank') or 0):>3} "
             f"{row['games_played']:>3.0f} {row['actual_wins']:>3.0f} "
             f"{row['actual_losses']:>3.0f} "
             f"{row['preseason_expected_wins_at_gp']:>7.1f} "
             f"{row['preseason_win_error_at_gp']:>+7.1f} "
-            f"{row['current_82_pace']:>6.1f} {row['updated_pred_wins']:>6.1f}"
+            f"{row['current_82_pace']:>6.1f} {row['updated_pred_wins']:>6.1f} "
+            f"{str(row.get('playoff_tier') or ''):<9}"
         )
 
 

@@ -63,7 +63,7 @@ this range.
 | Dataset | Required fields |
 |---|---|
 | `players` | `PLAYER_ID`, `FULL_NAME`, `FIRST_NAME`, `LAST_NAME`, `IS_ACTIVE` |
-| `teams` | `TEAM_ID`, `FULL_NAME`, `ABBREVIATION`, `NICKNAME`, `CITY`, `STATE`, `YEAR_FOUNDED` |
+| `teams` | `TEAM_ID`, `FULL_NAME`, `ABBREVIATION`, `NICKNAME`, `CITY`, `STATE`, `YEAR_FOUNDED`, `CONFERENCE` |
 | `player_season_stats` | `PLAYER_ID`, `PLAYER_NAME`, `TEAM_ID`, `TEAM_ABBREVIATION`, `AGE`, `GP`, `MIN`, `FGM`, `FGA`, `FG_PCT`, `FG3M`, `FG3A`, `FG3_PCT`, `REB`, `AST`, `TOV`, `STL`, `BLK`, `PTS`, `PLUS_MINUS`, `season` |
 | `shot_charts` | `PLAYER_ID`, `PLAYER_NAME`, `TEAM_ID`, `GAME_ID`, `GAME_DATE`, `EVENT_TYPE`, `SHOT_MADE_FLAG`, `SHOT_TYPE`, `SHOT_DISTANCE`, `LOC_X`, `LOC_Y`, `season` |
 
