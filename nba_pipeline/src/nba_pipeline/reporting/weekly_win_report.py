@@ -18,6 +18,7 @@ import pandas as pd
 from nba_pipeline.config import GAMES_PER_SEASON, Settings, settings
 from nba_pipeline.modeling import tracking
 from nba_pipeline.modeling.tracking import OVERPERFORMER_COUNT, UNDERPERFORMER_COUNT
+from nba_pipeline.reporting import theme
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,7 @@ class WeeklyReport:
         cfg.reports_dir.mkdir(parents=True, exist_ok=True)
         path = cfg.reports_dir / f"weekly_win_report_{self.as_of}.html"
         path.write_text(self.html_body)
+        theme.archive_touched(cfg)
         return path
 
 
@@ -311,21 +313,10 @@ def _text_table(table: pd.DataFrame, columns: list[tuple[str, str, str]]) -> str
 
 
 def _card(label: str, value: str, note: str = "") -> str:
-    note_html = (
-        f'<div style="font-size:12px;color:#6b7280;margin-top:4px;">{html.escape(note)}</div>'
-        if note
-        else ""
-    )
+    note_html = f'<div class="note">{html.escape(note)}</div>' if note else ""
     return (
-        '<td style="padding:6px;" valign="top">'
-        '<div style="border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;'
-        'background:#ffffff;">'
-        f'<div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;'
-        f'color:#6b7280;">{html.escape(label)}</div>'
-        f'<div style="font-size:24px;font-weight:600;color:#111827;margin-top:6px;">'
-        f"{html.escape(value)}</div>"
-        f"{note_html}"
-        "</div></td>"
+        f'<div class="report-card"><div class="label">{html.escape(label)}</div>'
+        f'<div class="value">{html.escape(value)}</div>{note_html}</div>'
     )
 
 
@@ -370,10 +361,7 @@ def _render_html(
 
     sections = [
         _html_header(season, as_of, summary, metrics),
-        '<table role="presentation" cellpadding="0" cellspacing="0" '
-        'style="width:100%;border-collapse:separate;"><tr>'
-        + "".join(cards)
-        + "</tr></table>",
+        f'<div class="report-cards">{"".join(cards)}</div>',
         _html_training_block(summary),
         _html_deltas(deltas),
     ]
@@ -383,14 +371,14 @@ def _render_html(
             _html_surprises(
                 f"Top {OVERPERFORMER_COUNT} overperformers",
                 summary.get("overperformers") or [],
-                "#047857",
+                positive=True,
             )
         )
         sections.append(
             _html_surprises(
                 f"Bottom {UNDERPERFORMER_COUNT} underperformers",
                 summary.get("underperformers") or [],
-                "#b91c1c",
+                positive=False,
             )
         )
     sections.append(_html_conference_boards(summary, started=started))
@@ -398,29 +386,19 @@ def _render_html(
     sections.append(_html_footer(started))
 
     body = "\n".join(s for s in sections if s)
-    return f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{html.escape(_subject(season, as_of, summary))}</title></head>
-<body style="margin:0;padding:24px;background:#f3f4f6;
-font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
-color:#111827;">
-<div style="max-width:860px;margin:0 auto;">
-{body}
-</div></body></html>"""
+    return theme.wrap_report_document(
+        title=_subject(season, as_of, summary),
+        body_html=body,
+    )
 
 
 def _html_header(season: str, as_of: str, summary: dict, metrics: dict | None) -> str:
     return (
-        '<div style="background:#111827;color:#f9fafb;border-radius:12px;'
-        'padding:22px 24px;margin-bottom:12px;">'
-        f'<div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;'
-        f'color:#9ca3af;">Weekly report · {html.escape(as_of)}</div>'
-        f'<h1 style="margin:8px 0 6px;font-size:24px;">NBA {html.escape(season)} '
-        "Win Predictor</h1>"
-        f'<div style="font-size:14px;color:#d1d5db;">'
-        f"{html.escape(_training_line(summary, metrics))}</div>"
-        "</div>"
+        '<section class="report-hero">'
+        f'<p class="report-kicker">Weekly report · {html.escape(as_of)}</p>'
+        f'<h1 class="report-title">NBA {html.escape(season)} Win Predictor</h1>'
+        f'<p class="report-lede">{html.escape(_training_line(summary, metrics))}</p>'
+        "</section>"
     )
 
 
@@ -430,38 +408,32 @@ def _html_training_block(summary: dict) -> str:
         ("In-season model", summary.get("cv_mae_profile"), summary.get("cv_r2_profile")),
     ]
     cells = "".join(
-        f'<tr><td style="padding:6px 10px;border-top:1px solid #e5e7eb;">'
-        f"{html.escape(name)}</td>"
-        f'<td style="padding:6px 10px;border-top:1px solid #e5e7eb;text-align:right;">'
-        f"{_fmt(mae)} wins</td>"
-        f'<td style="padding:6px 10px;border-top:1px solid #e5e7eb;text-align:right;">'
-        f"{_fmt(r2)}</td></tr>"
+        "<tr>"
+        f"<td>{html.escape(name)}</td>"
+        f'<td class="num">{_fmt(mae)} wins</td>'
+        f'<td class="num">{_fmt(r2)}</td>'
+        "</tr>"
         for name, mae, r2 in rows
     )
     return (
-        '<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;'
-        'padding:16px 18px;margin:12px 0;">'
-        '<h2 style="margin:0 0 4px;font-size:15px;">Cross-validated training accuracy</h2>'
-        '<p style="margin:0 0 8px;font-size:12px;color:#6b7280;">'
-        "Leave-one-season-out across the training window.</p>"
-        '<table style="width:100%;border-collapse:collapse;font-size:13px;">'
-        '<tr><th style="text-align:left;padding:6px 10px;font-size:11px;color:#6b7280;'
-        'text-transform:uppercase;">Model</th>'
-        '<th style="text-align:right;padding:6px 10px;font-size:11px;color:#6b7280;'
-        'text-transform:uppercase;">MAE</th>'
-        '<th style="text-align:right;padding:6px 10px;font-size:11px;color:#6b7280;'
-        'text-transform:uppercase;">R²</th></tr>'
-        f"{cells}</table></div>"
+        '<section class="report-section">'
+        "<h2>Cross-validated training accuracy</h2>"
+        '<p class="report-section-note">Leave-one-season-out across the training window.</p>'
+        '<div class="report-table-wrap"><table class="report-table">'
+        "<thead><tr><th>Model</th><th class=\"num\">MAE</th>"
+        '<th class="num">R²</th></tr></thead>'
+        f"<tbody>{cells}</tbody></table></div></section>"
     )
 
 
 def _html_deltas(deltas: dict | None) -> str:
     if not deltas:
         return (
-            '<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;'
-            'padding:16px 18px;margin:12px 0;font-size:13px;color:#6b7280;">'
-            "<strong style=\"color:#111827;\">Week over week</strong><br>"
-            "No snapshot from a week ago to compare against yet.</div>"
+            '<section class="report-section"><div class="report-panel">'
+            "<h2>Week over week</h2>"
+            '<p class="report-section-note" style="margin:0;">'
+            "No snapshot from a week ago to compare against yet.</p>"
+            "</div></section>"
         )
     rows = []
     for key, label in METRIC_LABELS.items():
@@ -469,21 +441,21 @@ def _html_deltas(deltas: dict | None) -> str:
             continue
         value = deltas[key]
         improved = value < 0 if key in LOWER_IS_BETTER else value > 0
-        colour = "#6b7280" if abs(value) < 0.005 else ("#047857" if improved else "#b91c1c")
+        if abs(value) < 0.005:
+            cls = "muted"
+        else:
+            cls = "pos" if improved else "neg"
         rows.append(
-            f'<tr><td style="padding:6px 10px;border-top:1px solid #e5e7eb;">'
-            f"{html.escape(label)}</td>"
-            f'<td style="padding:6px 10px;border-top:1px solid #e5e7eb;text-align:right;'
-            f'color:{colour};font-weight:600;">{value:+.2f}</td></tr>'
+            f"<tr><td>{html.escape(label)}</td>"
+            f'<td class="num {cls}">{value:+.2f}</td></tr>'
         )
     return (
-        '<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;'
-        'padding:16px 18px;margin:12px 0;">'
-        '<h2 style="margin:0 0 4px;font-size:15px;">Week over week</h2>'
-        f'<p style="margin:0 0 8px;font-size:12px;color:#6b7280;">Compared with '
+        '<section class="report-section">'
+        "<h2>Week over week</h2>"
+        f'<p class="report-section-note">Compared with '
         f"{html.escape(str(deltas['compared_to']))}. Green is an improvement.</p>"
-        '<table style="width:100%;border-collapse:collapse;font-size:13px;">'
-        f"{''.join(rows)}</table></div>"
+        '<div class="report-table-wrap"><table class="report-table">'
+        f"<tbody>{''.join(rows)}</tbody></table></div></section>"
     )
 
 
@@ -497,13 +469,11 @@ def _html_conference_boards(summary: dict, *, started: bool) -> str:
         for conference in ("East", "West")
     )
     return (
-        '<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;'
-        'padding:16px 18px;margin:12px 0;">'
-        '<h2 style="margin:0 0 4px;font-size:15px;">Projected playoff picture</h2>'
-        '<p style="margin:0 0 12px;font-size:12px;color:#6b7280;">'
+        '<section class="report-section">'
+        "<h2>Projected playoff picture</h2>"
+        '<p class="report-section-note">'
         "Top 6 in each conference make the playoffs; seeds 7–10 play in.</p>"
-        '<table role="presentation" cellpadding="0" cellspacing="0" '
-        f'style="width:100%;"><tr>{columns}</tr></table></div>'
+        f'<div class="report-boards">{columns}</div></section>'
     )
 
 
@@ -512,109 +482,88 @@ def _html_conference_column(
 ) -> str:
     if not rows:
         return (
-            f'<td style="width:50%;padding:0 8px;vertical-align:top;">'
-            f"<strong>{html.escape(conference)}ern</strong></td>"
+            f'<div class="report-panel"><h3>{html.escape(conference)}ern</h3></div>'
         )
-    tier_fill = {
-        "Playoffs": "#ecfdf5",
-        "Play-in": "#fffbeb",
-    }
     cells = []
     for row in rows:
-        fill = tier_fill.get(str(row.get("playoff_tier") or ""), "transparent")
+        tier = str(row.get("playoff_tier") or "")
+        tier_cls = {
+            "Playoffs": "tier-playoffs",
+            "Play-in": "tier-play-in",
+        }.get(tier, "")
         cells.append(
-            f'<tr style="background:{fill};">'
-            f'<td style="padding:4px 6px;border-top:1px solid #e5e7eb;width:2rem;">'
-            f'{_fmt(row.get("conference_rank"), "{:.0f}")}</td>'
-            f'<td style="padding:4px 6px;border-top:1px solid #e5e7eb;font-weight:600;">'
-            f'{html.escape(str(row.get("TEAM_ABBREVIATION") or "?"))}</td>'
-            f'<td style="padding:4px 6px;border-top:1px solid #e5e7eb;text-align:right;">'
-            f'{_fmt(row.get(win_key), "{:.1f}")}</td>'
-            f'<td style="padding:4px 6px;border-top:1px solid #e5e7eb;color:#6b7280;">'
-            f'{html.escape(str(row.get("playoff_tier") or ""))}</td></tr>'
+            f'<tr class="{tier_cls}">'
+            f'<td class="num">{_fmt(row.get("conference_rank"), "{:.0f}")}</td>'
+            f'<td class="team">{html.escape(str(row.get("TEAM_ABBREVIATION") or "?"))}</td>'
+            f'<td class="num">{_fmt(row.get(win_key), "{:.1f}")}</td>'
+            f'<td class="muted">{html.escape(tier)}</td></tr>'
         )
     return (
-        f'<td style="width:50%;padding:0 8px;vertical-align:top;">'
-        f'<div style="font-size:13px;font-weight:600;margin-bottom:6px;">'
-        f"{html.escape(conference)}ern Conference</div>"
-        '<table style="width:100%;border-collapse:collapse;font-size:12px;">'
-        f"{''.join(cells)}</table></td>"
+        f'<div class="report-panel"><h3>{html.escape(conference)}ern Conference</h3>'
+        '<div class="report-table-wrap"><table class="report-table">'
+        f"<tbody>{''.join(cells)}</tbody></table></div></div>"
     )
 
 
-def _html_surprises(title: str, rows: list[dict], colour: str) -> str:
+def _html_surprises(title: str, rows: list[dict], *, positive: bool) -> str:
     if not rows:
         return ""
+    cls = "pos" if positive else "neg"
     cells = "".join(
-        f'<tr><td style="padding:6px 10px;border-top:1px solid #e5e7eb;font-weight:600;">'
-        f"{html.escape(str(row.get('TEAM_ABBREVIATION') or row.get('TEAM_NAME') or '?'))}</td>"
-        f'<td style="padding:6px 10px;border-top:1px solid #e5e7eb;">'
-        f"{_fmt(row.get('actual_wins'), '{:.0f}')}-{_fmt(row.get('actual_losses'), '{:.0f}')}</td>"
-        f'<td style="padding:6px 10px;border-top:1px solid #e5e7eb;text-align:right;">'
-        f"{_fmt(row.get('preseason_expected_wins_at_gp'), '{:.1f}')}</td>"
-        f'<td style="padding:6px 10px;border-top:1px solid #e5e7eb;text-align:right;'
-        f'color:{colour};font-weight:600;">'
-        f"{_fmt(row.get('preseason_win_error_at_gp'), '{:+.1f}')}</td>"
-        f'<td style="padding:6px 10px;border-top:1px solid #e5e7eb;text-align:right;">'
-        f"{_fmt(row.get('updated_pred_wins'), '{:.1f}')}</td></tr>"
+        "<tr>"
+        f'<td class="team">{html.escape(str(row.get("TEAM_ABBREVIATION") or row.get("TEAM_NAME") or "?"))}</td>'
+        f"<td>{_fmt(row.get('actual_wins'), '{:.0f}')}-"
+        f"{_fmt(row.get('actual_losses'), '{:.0f}')}</td>"
+        f'<td class="num">{_fmt(row.get("preseason_expected_wins_at_gp"), "{:.1f}")}</td>'
+        f'<td class="num {cls}">{_fmt(row.get("preseason_win_error_at_gp"), "{:+.1f}")}</td>'
+        f'<td class="num">{_fmt(row.get("updated_pred_wins"), "{:.1f}")}</td>'
+        "</tr>"
         for row in rows
     )
     return (
-        '<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;'
-        'padding:16px 18px;margin:12px 0;">'
-        f'<h2 style="margin:0 0 8px;font-size:15px;">{html.escape(title)}</h2>'
-        '<table style="width:100%;border-collapse:collapse;font-size:13px;">'
-        '<tr><th style="text-align:left;padding:6px 10px;font-size:11px;color:#6b7280;'
-        'text-transform:uppercase;">Team</th>'
-        '<th style="text-align:left;padding:6px 10px;font-size:11px;color:#6b7280;'
-        'text-transform:uppercase;">Record</th>'
-        '<th style="text-align:right;padding:6px 10px;font-size:11px;color:#6b7280;'
-        'text-transform:uppercase;">Expected W</th>'
-        '<th style="text-align:right;padding:6px 10px;font-size:11px;color:#6b7280;'
-        'text-transform:uppercase;">Error</th>'
-        '<th style="text-align:right;padding:6px 10px;font-size:11px;color:#6b7280;'
-        'text-transform:uppercase;">Proj 82</th></tr>'
-        f"{cells}</table></div>"
+        f'<section class="report-section"><h2>{html.escape(title)}</h2>'
+        '<div class="report-table-wrap"><table class="report-table"><thead><tr>'
+        "<th>Team</th><th>Record</th><th class=\"num\">Expected W</th>"
+        '<th class="num">Error</th><th class="num">Proj 82</th>'
+        f"</tr></thead><tbody>{cells}</tbody></table></div></section>"
     )
 
 
 def _html_table(table: pd.DataFrame, started: bool) -> str:
     columns = table_columns(started)
     header = "".join(
-        '<th style="text-align:{align};padding:8px 10px;font-size:11px;color:#6b7280;'
-        'text-transform:uppercase;border-bottom:1px solid #d1d5db;">{label}</th>'.format(
-            align="left" if key == "TEAM_ABBREVIATION" else "right",
+        '<th{cls}>{label}</th>'.format(
+            cls="" if key == "TEAM_ABBREVIATION" else ' class="num"',
             label=html.escape(label),
         )
         for key, label, _ in columns
     )
     body = []
-    for position, (_, row) in enumerate(table.iterrows()):
-        background = "#ffffff" if position % 2 == 0 else "#f9fafb"
+    for _, row in table.iterrows():
         cells = []
         for key, _, spec in columns:
             value = row.get(key)
             text = str(value) if spec == "{}" else _fmt(value, spec, missing="—")
-            align = "left" if key == "TEAM_ABBREVIATION" else "right"
-            weight = "600" if key in {"TEAM_ABBREVIATION", "updated_pred_wins"} else "400"
-            colour = "#111827"
+            classes: list[str] = []
+            if key != "TEAM_ABBREVIATION":
+                classes.append("num")
+            if key == "TEAM_ABBREVIATION":
+                classes.append("team")
+            if key in {"updated_pred_wins", "preseason_pred_wins"}:
+                classes.append("mine")
             if key == "preseason_win_error_at_gp":
                 number = _num(value)
                 if number is not None and abs(number) >= 0.05:
-                    colour = "#047857" if number > 0 else "#b91c1c"
-                weight = "600"
-            cells.append(
-                f'<td style="padding:7px 10px;text-align:{align};font-size:13px;'
-                f'color:{colour};font-weight:{weight};">{html.escape(text)}</td>'
-            )
-        body.append(f'<tr style="background:{background};">' + "".join(cells) + "</tr>")
+                    classes.append("pos" if number > 0 else "neg")
+            class_attr = f' class="{" ".join(classes)}"' if classes else ""
+            cells.append(f"<td{class_attr}>{html.escape(text)}</td>")
+        body.append("<tr>" + "".join(cells) + "</tr>")
     title = "All 30 teams" if started else "Pre-season projection, all 30 teams"
     return (
-        '<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;'
-        'padding:16px 18px;margin:12px 0;overflow:auto;">'
-        f'<h2 style="margin:0 0 8px;font-size:15px;">{html.escape(title)}</h2>'
-        '<table style="width:100%;border-collapse:collapse;">'
-        f"<tr>{header}</tr>{''.join(body)}</table></div>"
+        f'<section class="report-section"><h2>{html.escape(title)}</h2>'
+        '<div class="report-table-wrap"><table class="report-table">'
+        f"<thead><tr>{header}</tr></thead>"
+        f"<tbody>{''.join(body)}</tbody></table></div></section>"
     )
 
 
@@ -629,8 +578,7 @@ def _html_footer(started: bool) -> str:
         else "Projections are reconciled so the league totals 1,230 wins.<br>"
     )
     return (
-        '<div style="font-size:12px;color:#6b7280;padding:4px 6px 0;line-height:1.6;">'
-        f"{glossary}"
+        f'<footer class="report-footer">{glossary}'
         "Generated locally by nba_pipeline."
-        "</div>"
+        "</footer>"
     )

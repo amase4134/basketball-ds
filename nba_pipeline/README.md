@@ -44,6 +44,12 @@ shots; broader results are aggregated server-side.
 
 ### Explorer features
 
+- **Reports.** The **Reports** nav item lists archived prediction digests from
+  `data/meta/reports/` (weekly win predictor + Opta comparison). Preview in the
+  explorer or open the full HTML. Report chrome is dark-first with two accent
+  colorways — **Broadcast** (cyan + orange) and **Scoreboard** (volt + amber) —
+  shared with the standalone archive pages. The live Win Predictor board stays
+  on `/predictions`.
 - **Multi-player selection.** Add up to 12 players from the typeahead or the
   table checkboxes. The selection drives a side-by-side comparison table with
   the leader marked per metric, and carries over to the Shot Explorer, where
@@ -203,7 +209,9 @@ python -m nba_pipeline send-win-report --to me@example.com
 It covers the accuracy scorecard, the week-over-week change in each metric, East/West
 projected playoff standings, the top 10 overperformers and bottom 5 underperformers
 versus the pre-season model, and the full 30-team table. Each run also archives the HTML to
-`data/meta/reports/weekly_win_report_YYYY-MM-DD.html`.
+`data/meta/reports/weekly_win_report_YYYY-MM-DD.html`, refreshes
+`data/meta/reports/index.html`, and keeps `report-theme.css` beside the archives so you can
+browse the folder locally without the React explorer.
 
 Configure delivery once:
 

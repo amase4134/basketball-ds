@@ -827,6 +827,9 @@ def test_preseason_report_explains_that_nothing_has_been_played(preseason):
     assert "Western Conference" in report.text_body
     assert "Projected playoff picture" in report.html_body
     assert report.html_body.startswith("<!DOCTYPE html>")
+    assert 'data-accent="broadcast"' in report.html_body
+    assert 'class="report-body"' in report.html_body
+    assert "--report-bg" in report.html_body
 
 
 def test_midseason_report_leads_with_accuracy(midseason):
@@ -905,6 +908,9 @@ def test_report_html_is_balanced_and_archived(preseason):
     assert archived.exists()
     assert archived.name == f"weekly_win_report_{report.as_of}.html"
     assert archived.read_text() == report.html_body
+    assert (preseason.reports_dir / "report-theme.css").exists()
+    assert (preseason.reports_dir / "index.html").exists()
+    assert archived.name in (preseason.reports_dir / "index.html").read_text()
 
 
 # --- Email transport ------------------------------------------------------
