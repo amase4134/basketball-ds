@@ -5,6 +5,7 @@ import { Players } from '../pages/Players';
 import { PlayerDetail } from '../pages/PlayerDetail';
 import { Shots } from '../pages/Shots';
 import { WinPredictions } from '../pages/WinPredictions';
+import { Reports } from '../pages/Reports';
 import { ThemeMenu } from './ThemeMenu';
 
 export function AppShell() {
@@ -23,6 +24,7 @@ export function AppShell() {
           <NavLink to="/players">Players</NavLink>
           <NavLink to="/shots">Shot Explorer</NavLink>
           <NavLink to="/predictions">Win Predictor</NavLink>
+          <NavLink to="/reports">Reports</NavLink>
         </nav>
         <ThemeMenu />
       </header>
@@ -33,6 +35,7 @@ export function AppShell() {
           <Route path="/players/:playerId" element={<PlayerDetail />} />
           <Route path="/shots" element={<Shots />} />
           <Route path="/predictions" element={<WinPredictions />} />
+          <Route path="/reports" element={<Reports />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>

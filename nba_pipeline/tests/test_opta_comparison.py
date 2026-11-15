@@ -153,8 +153,11 @@ def test_report_archives_html_and_csv(tmp_path):
     report = opta_comparison_report.build(comparison, summary, season=TARGET)
     html_path, csv_path = report.archive(cfg)
 
-    assert "Eastern Conference" in html_path.read_text()
-    assert "<svg" in html_path.read_text()
+    html = html_path.read_text()
+    assert "Eastern Conference" in html
+    assert "<svg" in html
+    assert 'data-accent="broadcast"' in html
+    assert "report-theme.css" in (cfg.reports_dir / "index.html").read_text()
     csv = pd.read_csv(csv_path)
     assert len(csv) == 30
     assert csv.set_index("TEAM_ABBREVIATION").loc["BOS", "win_diff"] == pytest.approx(4.0)

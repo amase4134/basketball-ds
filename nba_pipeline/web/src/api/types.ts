@@ -239,3 +239,24 @@ export interface WinPredictionHistory {
   meta: { season: string; snapshots: number; games_per_season: number };
   team?: { TEAM_ID: number; items: TeamTrajectoryPoint[] };
 }
+
+export type ReportAccent = 'broadcast' | 'scoreboard';
+
+export interface ArchivedReport {
+  filename: string;
+  kind: 'weekly_win' | 'opta_comparison' | 'other';
+  label: string;
+  season: string | null;
+  as_of: string | null;
+  size_bytes: number;
+}
+
+export interface ReportsList {
+  items: ArchivedReport[];
+  meta: {
+    count: number;
+    reports_dir: string;
+    accents: ReportAccent[];
+    default_accent: ReportAccent;
+  };
+}

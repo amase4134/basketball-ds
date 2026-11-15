@@ -290,3 +290,33 @@ def test_multi_player_shot_map_returns_points_within_limit():
     summary = client.get('/api/v1/shots/summary', params={'season': season, 'player_ids': selection}).json()
     assert summary['selected_player_count'] <= len(ids)
     assert summary['fga'] == mapped['total_matching']
+
+
+def test_reports_list_and_theme_are_readable(tmp_path):
+    from nba_pipeline.config import Settings
+    from nba_pipeline.reporting import theme
+    from nba_pipeline.web_api.app import create_app
+
+    cfg = Settings(project_root=tmp_path)
+    cfg.reports_dir.mkdir(parents=True)
+    sample = cfg.reports_dir / 'weekly_win_report_2026-11-14.html'
+    sample.write_text('<!DOCTYPE html><html><body>ok</body></html>')
+    theme.archive_touched(cfg)
+
+    api = TestClient(create_app(cfg))
+    listing = api.get('/api/v1/reports').json()
+    assert listing['meta']['default_accent'] == 'broadcast'
+    assert 'broadcast' in listing['meta']['accents']
+    names = {item['filename'] for item in listing['items']}
+    assert 'weekly_win_report_2026-11-14.html' in names
+    assert 'index.html' not in names
+
+    report = api.get('/api/v1/reports/weekly_win_report_2026-11-14.html')
+    assert report.status_code == 200
+    assert 'ok' in report.text
+
+    css = api.get('/api/v1/reports/theme.css')
+    assert css.status_code == 200
+    assert b'--report-bg' in css.content
+
+    assert api.get('/api/v1/reports/missing.html').status_code == 404

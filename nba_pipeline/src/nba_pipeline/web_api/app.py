@@ -11,6 +11,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from nba_pipeline.config import GAMES_PER_SEASON, Settings
 from nba_pipeline.modeling import tracking
+from nba_pipeline.reporting import theme as report_theme
 from .queries import DATASET_NAMES, DataUnavailable, InvalidFilter, MAX_SELECTED_IDS, PLAYER_COLUMNS, PLAYER_LIKES, PLAYER_RANGES, PLAYER_SORTS, PREDICTION_COLUMNS, PREDICTION_SORTS, SHOT_RANGES, SHOT_SORTS, contains_where, db, frame_records, id_list, jsonable, parse_bounds, range_where, require, rows, safe_execute, shot_where, available
 
 GRID = {"x_min": -250, "x_max": 250, "y_min": -50, "y_max": 420, "cell_size": 25, "point_limit": 5000}
@@ -211,6 +212,54 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
             if team.empty: raise HTTPException(404, f"No prediction history for team {team_id}")
             payload["team"] = {"TEAM_ID": team_id, "items": frame_records(team)}
         return payload
+
+    def reports_root() -> Path:
+        return cfg.reports_dir.resolve()
+
+    def resolve_report_file(filename: str) -> Path:
+        """Resolve a report basename under reports_dir; reject path traversal."""
+        name = Path(filename).name
+        if name != filename or name in {".", ".."} or "/" in filename or "\\" in filename:
+            raise HTTPException(400, "Invalid report filename")
+        root = reports_root()
+        candidate = (root / name).resolve()
+        if not candidate.is_relative_to(root):
+            raise HTTPException(400, "Invalid report filename")
+        if not candidate.is_file():
+            raise HTTPException(404, f"Report not found: {name}")
+        return candidate
+
+    @app.get("/api/v1/reports")
+    def list_reports():
+        """List archived prediction report HTML files."""
+        items = report_theme.list_archived_reports(cfg)
+        return {
+            "items": items,
+            "meta": {
+                "count": len(items),
+                "reports_dir": str(cfg.reports_dir),
+                "accents": list(report_theme.ACCENT_WAYS),
+                "default_accent": report_theme.DEFAULT_ACCENT,
+            },
+        }
+
+    @app.get("/api/v1/reports/theme.css")
+    def report_theme_css():
+        path = report_theme.theme_css_path()
+        if not path.is_file():
+            raise HTTPException(404, "Report theme stylesheet missing")
+        return FileResponse(path, media_type="text/css")
+
+    @app.get("/api/v1/reports/{filename}")
+    def get_report(filename: str):
+        """Serve one archived report (HTML, CSS, or CSV) read-only."""
+        path = resolve_report_file(filename)
+        media = "text/html"
+        if path.suffix == ".css":
+            media = "text/css"
+        elif path.suffix == ".csv":
+            media = "text/csv"
+        return FileResponse(path, media_type=media)
 
     web_dist=cfg.project_root / 'web' / 'dist'
     if web_dist.exists():
