@@ -30,6 +30,9 @@ MIN_ROWS: dict[str, int] = {
     "team_season_stats": 30,
     "rosters": 30 * 13,
     "shot_charts": 1,
+    # Phase 2 floors only apply when a partition exists (opt-in refresh).
+    "game_logs": 1,
+    "play_by_play": 1,
 }
 
 # A full season carries ~0.1% genuine full-court heaves past the court bounds;
@@ -303,6 +306,62 @@ def check_shot_charts(df: pd.DataFrame, season: str) -> list[Finding]:
     return findings
 
 
+def check_game_logs(df: pd.DataFrame, season: str) -> list[Finding]:
+    """Validate a Phase 2 game-log partition when one is on disk."""
+    if df.empty:
+        return [Finding("game_logs", season, "partition is empty")]
+    findings = _check_min_rows("game_logs", season, len(df))
+    for column in ("GAME_ID", "TEAM_ID"):
+        if column not in df.columns:
+            findings.append(Finding("game_logs", season, f"missing {column} column"))
+            continue
+        if df[column].isna().any():
+            findings.append(Finding("game_logs", season, f"null {column} values"))
+    if {"GAME_ID", "TEAM_ID"} <= set(df.columns) and df.duplicated(
+        subset=["GAME_ID", "TEAM_ID"]
+    ).any():
+        findings.append(
+            Finding("game_logs", season, "duplicate GAME_ID + TEAM_ID rows")
+        )
+    if "WL" in df.columns:
+        unexpected = sorted(set(df["WL"].dropna().astype(str)) - {"W", "L"})
+        if unexpected:
+            findings.append(
+                Finding("game_logs", season, f"unexpected WL values: {unexpected}")
+            )
+    return findings
+
+
+def check_play_by_play(df: pd.DataFrame, season: str) -> list[Finding]:
+    """Validate a Phase 2 PBP partition when one is on disk."""
+    if df.empty:
+        return [Finding("play_by_play", season, "partition is empty")]
+    findings = _check_min_rows("play_by_play", season, len(df))
+    for column in ("GAME_ID", "EVENTNUM", "PERIOD", "PCTIMESTRING"):
+        if column not in df.columns:
+            findings.append(Finding("play_by_play", season, f"missing {column} column"))
+            continue
+        if df[column].isna().any():
+            findings.append(Finding("play_by_play", season, f"null {column} values"))
+    if {"GAME_ID", "EVENTNUM"} <= set(df.columns) and df.duplicated(
+        subset=["GAME_ID", "EVENTNUM"]
+    ).any():
+        findings.append(
+            Finding("play_by_play", season, "duplicate GAME_ID + EVENTNUM rows")
+        )
+    # Lead-change work needs score margin somewhere in the game; blank rows on
+    # non-scoring events are fine, but a partition with none at all is junk.
+    if "SCOREMARGIN" in df.columns:
+        present = df["SCOREMARGIN"].astype("string").fillna("").str.strip().ne("").any()
+        if not present:
+            findings.append(
+                Finding("play_by_play", season, "no SCOREMARGIN values present")
+            )
+    else:
+        findings.append(Finding("play_by_play", season, "missing SCOREMARGIN column"))
+    return findings
+
+
 def check_warehouse(
     *,
     cfg: Settings | None = None,
@@ -358,6 +417,16 @@ def check_warehouse(
         findings.append(
             Finding("shot_charts", season, "no curated partition for this season")
         )
+
+    # Phase 2 partitions are opt-in: only validate when present so a Phase 1
+    # warehouse (and daily check) stays healthy without game logs / PBP.
+    game_logs = _read_parquet_dir(cfg.curated_dir / "game_logs" / f"season={season}")
+    if game_logs is not None:
+        findings += check_game_logs(game_logs, season)
+
+    pbp = _read_parquet_dir(cfg.curated_dir / "play_by_play" / f"season={season}")
+    if pbp is not None:
+        findings += check_play_by_play(pbp, season)
 
     for dataset, dataset_season in (
         ("players", None),

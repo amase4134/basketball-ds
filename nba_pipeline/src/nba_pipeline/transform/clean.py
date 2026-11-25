@@ -7,7 +7,9 @@ import logging
 import pandas as pd
 
 from nba_pipeline.config import (
+    GAME_LOG_COLUMNS,
     PLAYER_STATS_KEEP_PREFIXES,
+    PLAY_BY_PLAY_COLUMNS,
     SHOT_CHART_COLUMNS,
     TEAM_STATS_COLUMNS,
 )
@@ -179,6 +181,58 @@ def clean_shot_charts(df: pd.DataFrame, season: str) -> pd.DataFrame:
             out[col] = pd.to_numeric(out[col], errors="coerce")
     cols = [c for c in SHOT_CHART_COLUMNS if c in out.columns]
     out = out[cols]
+    return out.reset_index(drop=True)
+
+
+def clean_game_logs(df: pd.DataFrame, season: str) -> pd.DataFrame:
+    """Team-game index: one row per team per game, with home/away and W/L."""
+    out = df.copy()
+    out["SEASON"] = season
+    if "GAME_ID" in out.columns:
+        out["GAME_ID"] = out["GAME_ID"].astype(str)
+    if "TEAM_ID" in out.columns:
+        out["TEAM_ID"] = pd.to_numeric(out["TEAM_ID"], errors="coerce").astype("Int64")
+    for col in ("PTS", "PLUS_MINUS"):
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
+    if "MATCHUP" in out.columns:
+        # LeagueGameLog uses "TEAM vs. OPP" for home, "TEAM @ OPP" for away.
+        out["IS_HOME"] = ~out["MATCHUP"].astype(str).str.contains("@", regex=False)
+    cols = [c for c in GAME_LOG_COLUMNS if c in out.columns]
+    out = out[cols]
+    if {"GAME_ID", "TEAM_ID"} <= set(out.columns):
+        out = out.drop_duplicates(subset=["GAME_ID", "TEAM_ID"])
+        out = out.sort_values(["GAME_DATE", "GAME_ID", "TEAM_ID"], kind="stable")
+    return out.reset_index(drop=True)
+
+
+def clean_play_by_play(df: pd.DataFrame, season: str) -> pd.DataFrame:
+    """Keep clock + score fields used for lead-change / time-ahead features."""
+    out = df.copy()
+    out["SEASON"] = season
+    if "GAME_ID" in out.columns:
+        out["GAME_ID"] = out["GAME_ID"].astype(str)
+    for col in (
+        "EVENTNUM",
+        "EVENTMSGTYPE",
+        "EVENTMSGACTIONTYPE",
+        "PERIOD",
+        "PLAYER1_ID",
+        "PLAYER2_ID",
+        "PLAYER1_TEAM_ID",
+        "PLAYER2_TEAM_ID",
+    ):
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce").astype("Int64")
+    # SCOREMARGIN is usually an int string, but blank on non-scoring events and
+    # sometimes the literal "TIE". Keep as string so callers can parse later.
+    if "SCOREMARGIN" in out.columns:
+        out["SCOREMARGIN"] = out["SCOREMARGIN"].astype("string")
+    cols = [c for c in PLAY_BY_PLAY_COLUMNS if c in out.columns]
+    out = out[cols]
+    if {"GAME_ID", "EVENTNUM"} <= set(out.columns):
+        out = out.drop_duplicates(subset=["GAME_ID", "EVENTNUM"])
+        out = out.sort_values(["GAME_ID", "EVENTNUM"], kind="stable")
     return out.reset_index(drop=True)
 
 

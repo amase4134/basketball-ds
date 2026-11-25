@@ -95,6 +95,11 @@ python -m nba_pipeline refresh --season 2023-24
 python -m nba_pipeline refresh --dataset player_season_stats --all
 python -m nba_pipeline refresh --dataset shot_charts --season 2023-24 --force
 
+# Phase 2 (opt-in): game logs + play-by-play — not part of the default refresh
+python -m nba_pipeline refresh --dataset game_logs --season 2025-26
+python -m nba_pipeline refresh --dataset play_by_play --season 2025-26 --max-pbp-games 5  # test pull
+python -m nba_pipeline refresh --include-phase2 --season 2025-26  # both Phase 2 datasets
+
 # Useful flags
 python -m nba_pipeline refresh --all --force
 python -m nba_pipeline refresh --dataset shot_charts --season 2023-24 --min-minutes 500
@@ -312,6 +317,8 @@ threshold, so a brand-new season does not fail the job every morning until midse
 | `win_predictions` | Derived by `train-wins` / `check-wins` | `data/curated/win_predictions/season=YYYY-YY/` | Current projection and error per team |
 | `opta_projections` | Scraped by `compare-opta` from Opta Analyst | `data/curated/opta_projections/season=YYYY-YY/` | Opta projected wins, playoff %, TRACR rank, conference seed; raw HTML under `data/raw/opta_projections/` |
 | `win_prediction_history` | Derived by `check-wins` | `data/curated/win_prediction_history/season=YYYY-YY/` | Dated snapshots, one row per team per day |
+| `game_logs` | `LeagueGameLog` (team grain) | `data/curated/game_logs/season=YYYY-YY/` | **Phase 2 (opt-in):** team-game index — `GAME_ID` ↔ teams / `WL` / home-away |
+| `play_by_play` | `PlayByPlayV2` (per `GAME_ID`) | `data/curated/play_by_play/season=YYYY-YY/` | **Phase 2 (opt-in):** clock + `SCORE` / `SCOREMARGIN` for lead-change / time-ahead work |
 
 Raw API dumps land under `data/raw/`. Refresh outcomes append to `data/meta/refresh_log.parquet`,
 model accuracy to `data/meta/win_model_metrics.json`, and emailed digests to `data/meta/reports/`.
@@ -358,7 +365,7 @@ nba_pipeline/
   src/nba_pipeline/
     config.py
     client.py          # retry / sleep
-    extract/           # static, player_stats, team_stats, shot_charts
+    extract/           # static, player_stats, team_stats, shot_charts, game_logs, play_by_play
     transform/clean.py
     load/              # parquet writers, duckdb views
     modeling/          # win prediction features, models, accuracy tracking
@@ -380,6 +387,25 @@ nba_pipeline/
 
 The client sleeps ~0.8s between successful calls and retries with exponential backoff. Be polite to `stats.nba.com` — prefer local Parquet/DuckDB during model iteration.
 
-## Phase 2 (deferred)
+## Phase 2 (opt-in ingest)
 
-Play-by-play / win probability, game logs, cloud sync.
+Play-by-play and game logs are **scaffolded** but not part of the default refresh or daily
+LaunchAgent — a full PBP season is roughly one `stats.nba.com` call per game (~1,230 regular-
+season games) on top of the usual ~0.8s client sleep.
+
+| Dataset | Source | Purpose |
+|---|---|---|
+| `game_logs` | `LeagueGameLog` (`player_or_team_abbreviation='T'`) | Game index: `GAME_ID`, `GAME_DATE`, team ids/abbreviations, `MATCHUP`, `WL`, `IS_HOME` |
+| `play_by_play` | `PlayByPlayV2` | Event timeline: `PERIOD`, `PCTIMESTRING`, `SCORE`, `SCOREMARGIN`, descriptions |
+
+Pull explicitly:
+
+```bash
+python -m nba_pipeline refresh --dataset game_logs --season 2025-26
+python -m nba_pipeline refresh --dataset play_by_play --season 2025-26 --max-pbp-games 5
+```
+
+`play_by_play` will extract `game_logs` first when the season index is missing. Quality checks
+validate Phase 2 partitions only when they exist on disk, so a Phase 1 warehouse still passes
+`python -m nba_pipeline check`. Lead-change / time-ahead feature derivation and win-probability
+modeling remain follow-on work; cloud sync is still deferred.
