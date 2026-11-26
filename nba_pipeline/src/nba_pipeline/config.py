@@ -111,6 +111,8 @@ class Settings:
             self.curated_dir / "team_season_stats",
             self.curated_dir / "rosters",
             self.curated_dir / "shot_charts",
+            self.curated_dir / "game_logs",
+            self.curated_dir / "play_by_play",
             self.curated_dir / "win_predictions",
             self.curated_dir / "win_prediction_history",
             self.meta_dir,
@@ -118,6 +120,7 @@ class Settings:
             path.mkdir(parents=True, exist_ok=True)
 
 
+# Phase 1 datasets: pulled by the default refresh and daily automation.
 DATASETS = (
     "players",
     "teams",
@@ -126,6 +129,56 @@ DATASETS = (
     "rosters",
     "shot_charts",
 )
+
+# Phase 2 (opt-in): game index + play-by-play. Not included in a bare `refresh`
+# so daily jobs stay light; pass --dataset or --include-phase2 to pull them.
+PHASE2_DATASETS = (
+    "game_logs",
+    "play_by_play",
+)
+
+ALL_DATASETS = DATASETS + PHASE2_DATASETS
+
+# Team-game index from LeagueGameLog (player_or_team_abbreviation='T').
+# Two rows per game (home + away); join key for play-by-play is GAME_ID.
+GAME_LOG_COLUMNS = [
+    "SEASON",
+    "GAME_ID",
+    "GAME_DATE",
+    "TEAM_ID",
+    "TEAM_ABBREVIATION",
+    "TEAM_NAME",
+    "MATCHUP",
+    "WL",
+    "PTS",
+    "PLUS_MINUS",
+    "IS_HOME",
+]
+
+# PlayByPlayV2 fields needed for score timelines / lead-change work.
+# SCOREMARGIN is home-relative; SCORE is "away - home" style scoreboard text.
+PLAY_BY_PLAY_COLUMNS = [
+    "SEASON",
+    "GAME_ID",
+    "EVENTNUM",
+    "EVENTMSGTYPE",
+    "EVENTMSGACTIONTYPE",
+    "PERIOD",
+    "PCTIMESTRING",
+    "HOMEDESCRIPTION",
+    "NEUTRALDESCRIPTION",
+    "VISITORDESCRIPTION",
+    "SCORE",
+    "SCOREMARGIN",
+    "PLAYER1_ID",
+    "PLAYER1_NAME",
+    "PLAYER1_TEAM_ID",
+    "PLAYER1_TEAM_ABBREVIATION",
+    "PLAYER2_ID",
+    "PLAYER2_NAME",
+    "PLAYER2_TEAM_ID",
+    "PLAYER2_TEAM_ABBREVIATION",
+]
 
 # Columns kept for curated shot charts (keys + modeling fields).
 SHOT_CHART_COLUMNS = [

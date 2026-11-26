@@ -37,7 +37,9 @@ refresh.
 - Calling `stats.nba.com` or triggering pipeline refreshes from the browser.
 - Authentication, multi-user accounts, public deployment, and cloud hosting.
 - Editing source data from the UI.
-- Play-by-play, win probability, game logs, predictions, and clustering.
+- Play-by-play, win probability, game logs, predictions, and clustering
+  (pipeline Phase 2 now scaffolds opt-in `game_logs` / `play_by_play` Parquet
+  ingest; Explorer UI support for those datasets remains out of scope).
 - A full ad-hoc SQL editor (may be considered after the MVP).
 
 ## 3. Existing Data Contract

@@ -23,6 +23,8 @@ PARTITIONED_DATASETS = (
     "team_season_stats",
     "rosters",
     "shot_charts",
+    "game_logs",
+    "play_by_play",
     "win_predictions",
     "win_prediction_history",
 )

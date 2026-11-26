@@ -9,13 +9,17 @@ import pandas as pd
 import typer
 
 from nba_pipeline.config import (
+    ALL_DATASETS,
     DATASETS,
     GAMES_PER_SEASON,
+    PHASE2_DATASETS,
     Settings,
     settings,
     warehouse_seasons,
 )
 from nba_pipeline.extract import opta_projections
+from nba_pipeline.extract.game_logs import extract_game_logs
+from nba_pipeline.extract.play_by_play import extract_play_by_play
 from nba_pipeline.extract.player_stats import extract_player_season_stats
 from nba_pipeline.extract.rosters import extract_rosters
 from nba_pipeline.extract.shot_charts import extract_shot_charts
@@ -69,7 +73,19 @@ def refresh(
     dataset: Optional[str] = typer.Option(
         None,
         "--dataset",
-        help=f"One of: {', '.join(DATASETS)}. Default: all datasets.",
+        help=(
+            f"One of: {', '.join(ALL_DATASETS)}. "
+            f"Default: Phase 1 datasets ({', '.join(DATASETS)}). "
+            f"Phase 2 ({', '.join(PHASE2_DATASETS)}) requires --dataset or --include-phase2."
+        ),
+    ),
+    include_phase2: bool = typer.Option(
+        False,
+        "--include-phase2",
+        help=(
+            "Also refresh Phase 2 datasets (game_logs, play_by_play). "
+            "A full PBP season is ~1 API call per game — prefer --max-pbp-games when testing."
+        ),
     ),
     force: bool = typer.Option(
         False,
@@ -91,16 +107,30 @@ def refresh(
         "--max-shot-players",
         help="Limit players per season for shot charts (testing).",
     ),
+    max_pbp_games: Optional[int] = typer.Option(
+        None,
+        "--max-pbp-games",
+        help="Limit games per season for play-by-play pulls (testing).",
+    ),
 ) -> None:
     """Extract → transform → load curated Parquet for selected datasets."""
     cfg = Settings(min_minutes=min_minutes)
     cfg.ensure_dirs()
 
-    if dataset is not None and dataset not in DATASETS:
-        raise typer.BadParameter(f"Unknown dataset '{dataset}'. Choose from {DATASETS}.")
+    if dataset is not None and dataset not in ALL_DATASETS:
+        raise typer.BadParameter(
+            f"Unknown dataset '{dataset}'. Choose from {ALL_DATASETS}."
+        )
+    if dataset is not None and include_phase2:
+        raise typer.BadParameter("Use either --dataset or --include-phase2, not both.")
 
     seasons = _resolve_seasons(season, all_seasons, cfg)
-    datasets = [dataset] if dataset else list(DATASETS)
+    if dataset:
+        datasets = [dataset]
+    elif include_phase2:
+        datasets = list(ALL_DATASETS)
+    else:
+        datasets = list(DATASETS)
 
     # Shot charts depend on player_season_stats for eligibility.
     if "shot_charts" in datasets and "player_season_stats" not in datasets:
@@ -110,6 +140,14 @@ def refresh(
             if not stats_path.exists():
                 logger.info("player_season_stats missing for %s; extracting first", s)
                 extract_player_season_stats([s], cfg=cfg, force=force, dry_run=dry_run)
+
+    # Play-by-play depends on the game-log index for GAME_IDs.
+    if "play_by_play" in datasets and "game_logs" not in datasets:
+        for s in seasons:
+            logs_path = cfg.curated_dir / "game_logs" / f"season={s}" / "data.parquet"
+            if not logs_path.exists():
+                logger.info("game_logs missing for %s; extracting first", s)
+                extract_game_logs([s], cfg=cfg, force=force, dry_run=dry_run)
 
     logger.info("Refresh datasets=%s seasons=%s force=%s dry_run=%s", datasets, seasons, force, dry_run)
 
@@ -131,6 +169,16 @@ def refresh(
             dry_run=dry_run,
             min_minutes=min_minutes,
             max_players=max_shot_players,
+        )
+    if "game_logs" in datasets:
+        extract_game_logs(seasons, cfg=cfg, force=force, dry_run=dry_run)
+    if "play_by_play" in datasets:
+        extract_play_by_play(
+            seasons,
+            cfg=cfg,
+            force=force,
+            dry_run=dry_run,
+            max_games=max_pbp_games,
         )
 
     typer.echo("Refresh complete.")
