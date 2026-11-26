@@ -247,6 +247,32 @@ def check_team_season_stats(df: pd.DataFrame, season: str) -> list[Finding]:
         pct = pd.to_numeric(df["W_PCT"], errors="coerce").dropna()
         if ((pct < 0) | (pct > 1)).any():
             findings.append(Finding("team_season_stats", season, "W_PCT outside 0–1"))
+
+    lead_cols = ("POSS_AHEAD_SHARE", "POSS_BEHIND_SHARE", "POSS_TIED_SHARE")
+    if all(col in df.columns for col in lead_cols):
+        shares = df[list(lead_cols)].apply(pd.to_numeric, errors="coerce")
+        present = shares.notna().any(axis=1)
+        if present.any():
+            subset = shares.loc[present]
+            if ((subset < 0) | (subset > 1)).any().any():
+                findings.append(
+                    Finding(
+                        "team_season_stats",
+                        season,
+                        "lead-share columns outside 0–1",
+                    )
+                )
+            # Allow a little floating-point slack; buckets should roughly partition.
+            totals = subset.sum(axis=1)
+            bad = int(((totals < 0.95) | (totals > 1.05)).sum())
+            if bad:
+                findings.append(
+                    Finding(
+                        "team_season_stats",
+                        season,
+                        f"{bad} teams where POSS_*_SHARE do not sum to ~1",
+                    )
+                )
     return findings
 
 

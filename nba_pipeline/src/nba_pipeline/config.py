@@ -285,6 +285,20 @@ TEAM_ADVANCED_COLUMNS = [
     "PIE",
 ]
 
-TEAM_STATS_COLUMNS = TEAM_IDENTITY_COLUMNS + TEAM_BASE_COLUMNS + TEAM_ADVANCED_COLUMNS
+# Lead-time aggregates (Phase 2 analysis inputs), from pbpstats score-margin
+# breakdown: share of possessions that start with the team ahead / behind / tied.
+# Proxy for clock-weighted time-ahead % until curated play_by_play exists.
+TEAM_LEAD_SHARE_COLUMNS = [
+    "POSS_AHEAD_SHARE",
+    "POSS_BEHIND_SHARE",
+    "POSS_TIED_SHARE",
+]
+
+TEAM_STATS_COLUMNS = (
+    TEAM_IDENTITY_COLUMNS
+    + TEAM_BASE_COLUMNS
+    + TEAM_ADVANCED_COLUMNS
+    + TEAM_LEAD_SHARE_COLUMNS
+)
 
 settings = Settings()
