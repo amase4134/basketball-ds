@@ -409,3 +409,13 @@ python -m nba_pipeline refresh --dataset play_by_play --season 2025-26 --max-pbp
 validate Phase 2 partitions only when they exist on disk, so a Phase 1 warehouse still passes
 `python -m nba_pipeline check`. Lead-change / time-ahead feature derivation and win-probability
 modeling remain follow-on work; cloud sync is still deferred.
+
+**Resilience notes**
+
+- The HTTP client prefers **IPv4** (some hosts resolve `stats.nba.com` to unreachable IPv6 first).
+- `game_logs` tries `LeagueGameLog` first; if `stats.nba.com` is blocked/blackholed it falls back to
+  [`api.pbpstats.com/get-games`](https://api.pbpstats.com/docs) and maps into the same curated schema
+  (refresh log `message` records `source=…`).
+- `play_by_play` still requires `PlayByPlayV2` on `stats.nba.com`. It probes once and fails fast when
+  the host is unreachable, and **resumes** without `--force` by skipping `GAME_ID`s already on disk
+  (checkpoints every 25 newly fetched games). Re-run the same command after a stall to continue.

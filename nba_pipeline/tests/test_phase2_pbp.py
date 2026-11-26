@@ -12,6 +12,7 @@ from nba_pipeline.config import (
     PHASE2_DATASETS,
     Settings,
 )
+from nba_pipeline.extract.game_logs import game_logs_from_pbpstats_games
 from nba_pipeline.load.duckdb_views import PARTITIONED_DATASETS, connect
 from nba_pipeline.load.parquet import replace_season_partition
 from nba_pipeline.quality import check_game_logs, check_play_by_play, check_warehouse
@@ -68,6 +69,34 @@ def test_phase2_datasets_are_opt_in_not_default():
     assert ALL_DATASETS[-2:] == PHASE2_DATASETS
     assert "game_logs" in PARTITIONED_DATASETS
     assert "play_by_play" in PARTITIONED_DATASETS
+
+
+def test_pbpstats_games_map_to_two_team_rows():
+    games = [
+        {
+            "GameId": "0022600001",
+            "Date": "2026-10-20",
+            "HomeTeamId": 1610612765,
+            "AwayTeamId": 1610612738,
+            "HomePoints": 121,
+            "AwayPoints": 113,
+            "HomeTeamAbbreviation": "DET",
+            "AwayTeamAbbreviation": "BOS",
+        }
+    ]
+    raw = game_logs_from_pbpstats_games(
+        games, team_names={1610612765: "Detroit Pistons", 1610612738: "Boston Celtics"}
+    )
+    curated = clean_game_logs(raw, SEASON)
+    assert len(curated) == 2
+    home = curated.loc[curated["IS_HOME"]].iloc[0]
+    away = curated.loc[~curated["IS_HOME"]].iloc[0]
+    assert home["TEAM_ABBREVIATION"] == "DET"
+    assert home["WL"] == "W"
+    assert away["TEAM_ABBREVIATION"] == "BOS"
+    assert away["WL"] == "L"
+    assert home["PTS"] == 121
+    assert away["PLUS_MINUS"] == -8
 
 
 def test_clean_game_logs_marks_home_and_dedupes():
