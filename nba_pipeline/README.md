@@ -312,7 +312,7 @@ threshold, so a brand-new season does not fail the job every morning until midse
 | `teams` | `nba_api.stats.static.teams` | `data/curated/teams/teams.parquet` | Team directory |
 | `player_season_stats` | `LeagueDashPlayerStats` (Per100Possessions rates + Totals `MIN`) | `data/curated/player_season_stats/season=YYYY-YY/` | Archetype clustering; `MIN` is season total minutes |
 | `shot_charts` | `ShotChartDetail` (FGA, `team_id=0`) | `data/curated/shot_charts/season=YYYY-YY/` | `LOC_X` / `LOC_Y` shot locations |
-| `team_season_stats` | `LeagueDashTeamStats` (Base Per100 + Advanced) | `data/curated/team_season_stats/season=YYYY-YY/` | Win predictor inputs: record, ratings, four factors |
+| `team_season_stats` | `LeagueDashTeamStats` (Base Per100 + Advanced) + pbpstats margin breakdown | `data/curated/team_season_stats/season=YYYY-YY/` | Win predictor inputs: record, ratings, four factors; plus `POSS_AHEAD_SHARE` / `POSS_BEHIND_SHARE` / `POSS_TIED_SHARE` (possession lead-time shares) |
 | `rosters` | `CommonAllPlayers` (current season only) | `data/curated/rosters/season=YYYY-YY/` | Which team every rostered player belongs to now; feeds pre-season roster strength |
 | `win_predictions` | Derived by `train-wins` / `check-wins` | `data/curated/win_predictions/season=YYYY-YY/` | Current projection and error per team |
 | `opta_projections` | Scraped by `compare-opta` from Opta Analyst | `data/curated/opta_projections/season=YYYY-YY/` | Opta projected wins, playoff %, TRACR rank, conference seed; raw HTML under `data/raw/opta_projections/` |
@@ -336,6 +336,12 @@ Identity and record: `TEAM_ID`, `TEAM_NAME`, `TEAM_ABBREVIATION`, `GP`, `W`, `L`
 Efficiency and four factors: `OFF_RATING`, `DEF_RATING`, `NET_RATING`, `PACE`, `TS_PCT`, `EFG_PCT`,
 `AST_PCT`, `AST_TO`, `OREB_PCT`, `DREB_PCT`, `REB_PCT`, `TM_TOV_PCT`, `PLUS_MINUS`, plus per-100
 box score rates (+ hive `season`).
+
+Lead-time shares (from pbpstats score-margin breakdown, attached on every team-stats refresh):
+`POSS_AHEAD_SHARE`, `POSS_BEHIND_SHARE`, `POSS_TIED_SHARE` — fraction of possessions that start
+with the team ahead / behind / tied. Proxy for clock-weighted time-ahead % until curated
+`play_by_play` exists. When `stats.nba.com` is unreachable, identity + W/L can still be built
+from curated `game_logs` so these lead-share columns have a home.
 
 `FTA_RATE` is derived as `FTA / FGA` — the NBA's own definition — rather than pulled from a third
 measure type, which keeps the refresh to two API calls per season.
